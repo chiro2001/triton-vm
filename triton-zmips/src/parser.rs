@@ -218,46 +218,82 @@ fn an_instruction(s: &str) -> ParseResult<AnInstruction<String, String, String>>
     let blt = branch_instruction("blt", BLT(Default::default()));
     let ble = branch_instruction("ble", BLE(Default::default()));
     let j = jump_instruction();
-    let seq = instruction("seq", SEQ(Default::default()));
-    let sne = instruction("sne", SNE(Default::default()));
-    let slt = instruction("slt", SLT(Default::default()));
-    let sle = instruction("sle", SLE(Default::default()));
-    let jr = instruction("jr", JR(Default::default()));
+    let seq = instruction3("seq", |r1, r2, imm| {
+        SEQ((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let sne = instruction3("sne", |r1, r2, imm| {
+        SNE((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let slt = instruction3("slt", |r1, r2, imm| {
+        SLT((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let sle = instruction3("sle", |r1, r2, imm| {
+        SLE((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let jr = instruction1("jr", |r| JR(r.to_string()));
 
     let control_flow = alt((beq, bne, blt, ble, j, seq, sne, slt, sle, jr));
 
     // Memory access
-    let lw = instruction("lw", LW(Default::default()));
-    let sw = instruction("sw", SW(Default::default()));
+    let lw = instruction_load_save("lw", |r1, imm, r2| {
+        LW((r1.to_string(), imm.to_string(), r2.to_string()))
+    });
+    let sw = instruction_load_save("sw", |r1, imm, r2| {
+        SW((r1.to_string(), imm.to_string(), r2.to_string()))
+    });
 
     let memory_access = alt((lw, sw));
 
     // Arithmetic on stack instructions
-    let add = instruction("add", ADD(Default::default()));
-    let sub = instruction("sub", SUB(Default::default()));
-    let mult = instruction("mult", MULT(Default::default()));
-    let div = instruction("div", DIV(Default::default()));
-    let mod_ = instruction("mod", MOD(Default::default()));
-    let move_ = instruction("move", MOVE(Default::default()));
-    let la = instruction("la", LA(Default::default()));
-    let and = instruction("and", AND(Default::default()));
-    let xor = instruction("xor", XOR(Default::default()));
-    let not = instruction("not", NOT(Default::default()));
-    let sll = instruction("sll", SLL(Default::default()));
-    let srl = instruction("srl", SRL(Default::default()));
+    let add = instruction3("add", |r1, r2, imm| {
+        ADD((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let sub = instruction3("sub", |r1, r2, imm| {
+        SUB((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let mult = instruction3("mult", |r1, r2, imm| {
+        MULT((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let div = instruction3("div", |r1, r2, imm| {
+        DIV((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let mod_ = instruction3("mod", |r1, r2, imm| {
+        MOD((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let move_ = instruction2("move", |r1, imm| MOVE((r1.to_string(), imm.to_string())));
+    let la = instruction2("la", |r1, imm| LA((r1.to_string(), imm.to_string())));
+    let and = instruction3("and", |r1, r2, imm| {
+        AND((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let xor = instruction3("xor", |r1, r2, imm| {
+        XOR((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let not = instruction3("not", |r1, r2, imm| {
+        NOT((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let sll = instruction3("sll", |r1, r2, imm| {
+        SLL((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
+    let srl = instruction3("srl", |r1, r2, imm| {
+        SRL((r1.to_string(), r2.to_string(), imm.to_string()))
+    });
 
     let base_field_arithmetic_on_stack = alt((add, sub, mult, div, mod_, move_, la));
     let bitwise_arithmetic_on_stack = alt((and, xor, not, sll, srl));
     let arithmetic_on_stack = alt((base_field_arithmetic_on_stack, bitwise_arithmetic_on_stack));
 
     // Read/write
-    let pub_read = instruction("pubread", PUBREAD(Default::default()));
-    let sec_read = instruction("secread", SECREAD(Default::default()));
-    let pub_seek = instruction("pubseek", PUBSEEK(Default::default()));
-    let sec_seek = instruction("secseek", SECSEEK(Default::default()));
-    let print = instruction("print", PRINT(Default::default()));
-    let exit = instruction("exit", EXIT(Default::default()));
-    let answer = instruction("answer", ANSWER(Default::default()));
+    let pub_read = instruction1("pubread", |r| PUBREAD(r.to_string()));
+    let sec_read = instruction1("secread", |r| SECREAD(r.to_string()));
+    let pub_seek = instruction2("pubseek", |r1, imm| {
+        PUBSEEK((r1.to_string(), imm.to_string()))
+    });
+    let sec_seek = instruction2("secseek", |r1, imm| {
+        SECSEEK((r1.to_string(), imm.to_string()))
+    });
+    let print = instruction1("print", |r| PRINT(r.to_string()));
+    let exit = instruction1("exit", |r| EXIT(r.to_string()));
+    let answer = instruction1("answer", |r| ANSWER(r.to_string()));
 
     let read_write = alt((pub_read, sec_read, pub_seek, sec_seek, print, exit, answer));
 
@@ -283,13 +319,67 @@ fn is_instruction_name(s: &str) -> bool {
     ALL_INSTRUCTION_NAMES.contains(&s)
 }
 
-fn instruction<'a>(
+fn instruction_load_save<'a, F>(
     name: &'a str,
-    instruction: AnInstruction<String, String, String>,
-) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>> {
+    f: F,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>>
+where
+    F: Fn(&str, &str, &str) -> AnInstruction<String, String, String>,
+{
     move |s: &'a str| {
         let (s, _) = token1(name)(s)?; // require space after instruction name
-        Ok((s, instruction.clone()))
+        let (s, r1) = reg1(s)?;
+        let (s, _) = token1(",")(s)?;
+        let (s, imm) = immediate_value(s)?;
+        let (s, _) = token1("(")(s)?;
+        let (s, r2) = reg1(s)?;
+        let (s, _) = token1(")")(s)?;
+        Ok((s, f(r1, imm, r2)))
+    }
+}
+fn instruction3<'a, F>(
+    name: &'a str,
+    f: F,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>>
+where
+    F: Fn(&str, &str, &str) -> AnInstruction<String, String, String>,
+{
+    move |s: &'a str| {
+        let (s, _) = token1(name)(s)?; // require space after instruction name
+        let (s, r1) = reg1(s)?;
+        let (s, _) = token1(",")(s)?;
+        let (s, r2) = reg1(s)?;
+        let (s, _) = token1(",")(s)?;
+        let (s, imm) = immediate_value(s)?;
+        Ok((s, f(r1, r2, imm)))
+    }
+}
+fn instruction2<'a, F>(
+    name: &'a str,
+    f: F,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>>
+where
+    F: Fn(&str, &str) -> AnInstruction<String, String, String>,
+{
+    move |s: &'a str| {
+        let (s, _) = token1(name)(s)?; // require space after instruction name
+        let (s, r1) = reg1(s)?;
+        let (s, _) = token1(",")(s)?;
+        let (s, imm) = immediate_value(s)?;
+        Ok((s, f(r1, imm)))
+    }
+}
+fn instruction1<'a, F>(
+    name: &'a str,
+    f: F,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>>
+where
+    F: Fn(&str) -> AnInstruction<String, String, String>,
+{
+    move |s: &'a str| {
+        let (s, _) = token1(name)(s)?; // require space after instruction name
+        let (s, r) = reg1(s)?;
+        Ok((s, f(r)))
     }
 }
 
@@ -510,9 +600,18 @@ fn reg1(s: &str) -> ParseResult<&str> {
     if s.as_bytes()[0] != b'$' {
         context("expected register", fail)(s)
     } else {
-        let (s, reg) = is_not(" \t\r\n,")(s)?;
+        let (s, reg) = is_not(" \t\r\n,()[]~!@#$%^&*()`[]\\{}:\";',./<>?")(s)?;
         Ok((s, reg))
     }
+}
+
+fn immediate_value(s: &str) -> ParseResult<&str> {
+    if s.is_empty() {
+        return context("expect immediate value", fail)(s);
+    }
+    // TODO: parse value
+    let (s, imm) = is_not(" \t\r\n,")(s)?;
+    Ok((s, imm))
 }
 
 #[cfg(test)]
@@ -968,7 +1067,37 @@ mod parser_tests {
                     "__L1__".to_string(),
                 ))),
             ]),
-            message: "labels can start with an underscore",
+            message: "branch err",
         });
+    }
+
+    #[test]
+    fn parse_speck_code() {
+        parse_program_prop(TestCase {
+            input: "move $t4, 32
+secread $t2
+secread $t3
+__L1__:
+    srl $t5, $t3, 8
+    sll $t6, $t3, 56
+    or $t6, $t5, $t6
+    add $t3, $t6, $t2
+    secread $t7
+
+    xor $t3, $t3, $t7
+    srl $t5, $t2, 61
+    sll $t6, $t2, 3
+    or $t6, $t5, $t6
+    xor $t2, $t6, $t3
+
+    add $t1, $t1, 1
+bgt $t4, $t1, __L1__
+print $t2
+print $t3
+answer $t3
+",
+            expected: Program::new(&[]),
+            message: "parse code err",
+        })
     }
 }
