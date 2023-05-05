@@ -155,3 +155,5 @@ specification/cheatsheet.aux
 specification/cheatsheet.log
 specification/cheatsheet.synctex.gz
 triton-vm/proofs/*
+
+/.idea/

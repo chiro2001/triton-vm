@@ -186,6 +186,30 @@ pub fn save_proof(filename: &str, proof: Proof) -> Result<()> {
     Ok(())
 }
 
+pub const SPECK128_ZMIPS: &str = "
+move $t4, 32
+secread $t2
+secread $t3
+__L1__:
+    srl $t5, $t3, 8
+    sll $t6, $t3, 56
+    or $t6, $t5, $t6
+    add $t3, $t6, $t2
+    secread $t7
+
+    xor $t3, $t3, $t7
+    srl $t5, $t2, 61
+    sll $t6, $t2, 3
+    or $t6, $t5, $t6
+    xor $t2, $t6, $t3
+
+    add $t1, $t1, 1
+bgt $t4, $t1, __L1__
+print $t2
+print $t3
+answer $t3
+";
+
 pub const FIBONACCI_SEQUENCE: &str = "
     // initialize stack: ⊥ 0 1 i
     push 0
