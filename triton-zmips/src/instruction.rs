@@ -12,11 +12,11 @@ use strum_macros::EnumIter;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
 
-use crate::ord_n::Regs;
+use crate::regs::{Reg, RegA};
 use AnInstruction::*;
 
 /// An `Instruction` has `call` addresses encoded as absolute integers.
-pub type Instruction = AnInstruction<BFieldElement, Regs, u32>;
+pub type Instruction = AnInstruction<BFieldElement, Reg, RegA>;
 
 pub const ALL_INSTRUCTIONS: [Instruction; Instruction::COUNT] = all_instructions_without_args();
 pub const ALL_INSTRUCTION_NAMES: [&str; Instruction::COUNT] = all_instruction_names();
@@ -51,44 +51,46 @@ pub enum DivinationHint {}
 ///
 /// The type parameter `Dest` describes the type of addresses (absolute or labels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumCountMacro, EnumIter)]
-pub enum AnInstruction<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default> {
+pub enum AnInstruction<L: PartialEq + Default, R: PartialEq + Default, A: PartialEq + Default> {
     // Control flow
-    BEQ((R, R, Dest)),
-    BNE((R, R, Dest)),
-    BLT((R, R, Dest)),
-    BLE((R, R, Dest)),
-    SEQ((R, R, I)),
-    SNE((R, R, I)),
-    SLT((R, R, I)),
-    SLE((R, R, I)),
-    J(Dest),
+    BEQ((R, R, L)),
+    BNE((R, R, L)),
+    BLT((R, R, L)),
+    BLE((R, R, L)),
+    BGT((R, R, L)),
+    SEQ((R, R, A)),
+    SNE((R, R, A)),
+    SLT((R, R, A)),
+    SLE((R, R, A)),
+    J(L),
     JR(R),
 
     // Memory access
-    LW((R, I, R)),
-    SW((R, I, R)),
+    LW((R, A, R)),
+    SW((R, A, R)),
 
     // Base field arithmetic on stack
-    ADD((R, R, I)),
-    SUB((R, R, I)),
-    MULT((R, R, I)),
-    DIV((R, R, I)),
-    MOD((R, R, I)),
-    MOVE((R, I)),
-    LA((R, I)),
+    ADD((R, R, A)),
+    SUB((R, R, A)),
+    MULT((R, R, A)),
+    DIV((R, R, A)),
+    MOD((R, R, A)),
+    MOVE((R, A)),
+    LA((R, A)),
 
     // Bitwise arithmetic on stack
-    AND((R, R, I)),
-    XOR((R, R, I)),
-    NOT((R, R, I)),
-    SLL((R, R, I)),
-    SRL((R, R, I)),
+    AND((R, R, A)),
+    XOR((R, R, A)),
+    OR((R, R, A)),
+    NOT((R, R, A)),
+    SLL((R, R, A)),
+    SRL((R, R, A)),
 
     // Read/write
     PUBREAD(R),
     SECREAD(R),
-    PUBSEEK((R, I)),
-    SECSEEK((R, I)),
+    PUBSEEK((R, A)),
+    SECSEEK((R, A)),
     PRINT(R),
     EXIT(R),
     ANSWER(R),
@@ -136,6 +138,8 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default>
             PRINT(_) => 28,
             EXIT(_) => 29,
             ANSWER(_) => 30,
+            OR(_) => 31,
+            BGT(_) => 32,
         }
     }
 
@@ -145,6 +149,7 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default>
             BNE(_) => "bne",
             BLT(_) => "blt",
             BLE(_) => "ble",
+            BGT(_) => "bgt",
             SEQ(_) => "seq",
             SNE(_) => "sne",
             SLT(_) => "slt",
@@ -162,6 +167,7 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default>
             LA(_) => "la",
             AND(_) => "and",
             XOR(_) => "xor",
+            OR(_) => "or",
             NOT(_) => "not",
             SLL(_) => "sll",
             SRL(_) => "srl",
@@ -200,7 +206,7 @@ impl<Dest: PartialEq + Default> AnInstruction<Dest, String, String> {
     fn map_call_address<F, NewDest: PartialEq + Default>(
         &self,
         f: F,
-    ) -> AnInstruction<NewDest, Regs, u32>
+    ) -> AnInstruction<NewDest, Reg, RegA>
     where
         F: Fn(&Dest) -> NewDest,
         Dest: Clone,
@@ -210,30 +216,32 @@ impl<Dest: PartialEq + Default> AnInstruction<Dest, String, String> {
             BNE((r1, r2, addr)) => BNE((r1.into(), r2.into(), f(addr))),
             BLT((r1, r2, addr)) => BLT((r1.into(), r2.into(), f(addr))),
             BLE((r1, r2, addr)) => BLE((r1.into(), r2.into(), f(addr))),
-            SEQ((r1, r2, imm)) => SEQ((r1.into(), r2.into(), imm.parse().unwrap())),
-            SNE((r1, r2, imm)) => SNE((r1.into(), r2.into(), imm.parse().unwrap())),
-            SLT((r1, r2, imm)) => SLT((r1.into(), r2.into(), imm.parse().unwrap())),
-            SLE((r1, r2, imm)) => SLE((r1.into(), r2.into(), imm.parse().unwrap())),
+            BGT((r1, r2, addr)) => BGT((r1.into(), r2.into(), f(addr))),
+            SEQ((r1, r2, a)) => SEQ((r1.into(), r2.into(), a.into())),
+            SNE((r1, r2, a)) => SNE((r1.into(), r2.into(), a.into())),
+            SLT((r1, r2, a)) => SLT((r1.into(), r2.into(), a.into())),
+            SLE((r1, r2, a)) => SLE((r1.into(), r2.into(), a.into())),
             J(label) => J(f(label)),
             JR(r) => JR(r.into()),
-            LW((r1, imm, r2)) => LW((r1.into(), imm.parse().unwrap(), r2.into())),
-            SW((r1, imm, r2)) => SW((r1.into(), imm.parse().unwrap(), r2.into())),
-            ADD((r1, r2, imm)) => ADD((r1.into(), r2.into(), imm.parse().unwrap())),
-            SUB((r1, r2, imm)) => SUB((r1.into(), r2.into(), imm.parse().unwrap())),
-            MULT((r1, r2, imm)) => MULT((r1.into(), r2.into(), imm.parse().unwrap())),
-            DIV((r1, r2, imm)) => DIV((r1.into(), r2.into(), imm.parse().unwrap())),
-            MOD((r1, r2, imm)) => MOD((r1.into(), r2.into(), imm.parse().unwrap())),
-            MOVE((r, imm)) => MOVE((r.into(), imm.parse().unwrap())),
-            LA((r, imm)) => LA((r.into(), imm.parse().unwrap())),
-            AND((r1, r2, imm)) => AND((r1.into(), r2.into(), imm.parse().unwrap())),
-            XOR((r1, r2, imm)) => XOR((r1.into(), r2.into(), imm.parse().unwrap())),
-            NOT((r1, r2, imm)) => NOT((r1.into(), r2.into(), imm.parse().unwrap())),
-            SLL((r1, r2, imm)) => SLL((r1.into(), r2.into(), imm.parse().unwrap())),
-            SRL((r1, r2, imm)) => SRL((r1.into(), r2.into(), imm.parse().unwrap())),
+            LW((r1, a, r2)) => LW((r1.into(), a.into(), r2.into())),
+            SW((r1, a, r2)) => SW((r1.into(), a.into(), r2.into())),
+            ADD((r1, r2, a)) => ADD((r1.into(), r2.into(), a.into())),
+            SUB((r1, r2, a)) => SUB((r1.into(), r2.into(), a.into())),
+            MULT((r1, r2, a)) => MULT((r1.into(), r2.into(), a.into())),
+            DIV((r1, r2, a)) => DIV((r1.into(), r2.into(), a.into())),
+            MOD((r1, r2, a)) => MOD((r1.into(), r2.into(), a.into())),
+            MOVE((r, a)) => MOVE((r.into(), a.into())),
+            LA((r, a)) => LA((r.into(), a.into())),
+            AND((r1, r2, a)) => AND((r1.into(), r2.into(), a.into())),
+            XOR((r1, r2, a)) => XOR((r1.into(), r2.into(), a.into())),
+            OR((r1, r2, a)) => OR((r1.into(), r2.into(), a.into())),
+            NOT((r1, r2, a)) => NOT((r1.into(), r2.into(), a.into())),
+            SLL((r1, r2, a)) => SLL((r1.into(), r2.into(), a.into())),
+            SRL((r1, r2, a)) => SRL((r1.into(), r2.into(), a.into())),
             PUBREAD(r) => PUBREAD(r.into()),
             SECREAD(r) => SECREAD(r.into()),
-            PUBSEEK((r, imm)) => PUBSEEK((r.into(), imm.parse().unwrap())),
-            SECSEEK((r, imm)) => SECSEEK((r.into(), imm.parse().unwrap())),
+            PUBSEEK((r, a)) => PUBSEEK((r.into(), a.into())),
+            SECSEEK((r, a)) => SECSEEK((r.into(), a.into())),
             PRINT(r) => PRINT(r.into()),
             EXIT(r) => EXIT(r.into()),
             ANSWER(r) => ANSWER(r.into()),
@@ -254,6 +262,7 @@ impl<
             BNE((r1, r2, addr)) => write!(f, " {}, {}, {}", r1, r2, addr),
             BLT((r1, r2, addr)) => write!(f, " {}, {}, {}", r1, r2, addr),
             BLE((r1, r2, addr)) => write!(f, " {}, {}, {}", r1, r2, addr),
+            BGT((r1, r2, addr)) => write!(f, " {}, {}, {}", r1, r2, addr),
             J(addr) => write!(f, " {}", addr),
             _ => Ok(()),
         }
@@ -265,7 +274,9 @@ impl Instruction {
         match self {
             BEQ((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
             BNE((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
+            BLT((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
             BLE((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
+            BGT((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
             J(addr) => vec![*addr],
             _ => vec![],
         }
@@ -340,7 +351,7 @@ fn convert_labels_helper(
         LabelledInstruction::Label(_) => vec![],
 
         LabelledInstruction::Instruction(instr) => {
-            let unlabelled_instruction: AnInstruction<BFieldElement, Regs, u32> = instr
+            let unlabelled_instruction: AnInstruction<BFieldElement, Reg, RegA> = instr
                 .map_call_address(|label_name| {
                     let label_not_found = format!("Label not found: {label_name}");
                     let absolute_address = label_map.get(label_name).expect(&label_not_found);
@@ -352,24 +363,26 @@ fn convert_labels_helper(
     }
 }
 
-const DEFAULT_BRANCH_INFO: (Regs, Regs, BFieldElement) = (Regs::Zero, Regs::Zero, BFIELD_ZERO);
-const DEFAULT_LOAD_SAVE: (Regs, u32, Regs) = (Regs::Zero, 0, Regs::Zero);
-const DEFAULT_INFO3: (Regs, Regs, u32) = (Regs::Zero, Regs::Zero, 0);
-const DEFAULT_INFO2: (Regs, u32) = (Regs::Zero, 0);
+const DEFAULT_BRANCH_INFO: (Reg, Reg, BFieldElement) = (Reg::Zero, Reg::Zero, BFIELD_ZERO);
+const DEFAULT_LOAD_SAVE: (Reg, RegA, Reg) = (Reg::Zero, RegA::RegName(Reg::Zero), Reg::Zero);
+const DEFAULT_INFO3: (Reg, Reg, RegA) = (Reg::Zero, Reg::Zero, RegA::Imm(0));
+const DEFAULT_INFO2: (Reg, RegA) = (Reg::Zero, RegA::Imm(0));
+const DEFAULT_REG_R: Reg = Reg::Zero;
 
 const fn all_instructions_without_args(
-) -> [AnInstruction<BFieldElement, Regs, u32>; Instruction::COUNT] {
+) -> [AnInstruction<BFieldElement, Reg, RegA>; Instruction::COUNT] {
     [
         BEQ(DEFAULT_BRANCH_INFO),
         BNE(DEFAULT_BRANCH_INFO),
         BLT(DEFAULT_BRANCH_INFO),
         BLE(DEFAULT_BRANCH_INFO),
+        BGT(DEFAULT_BRANCH_INFO),
         SEQ(DEFAULT_INFO3),
         SNE(DEFAULT_INFO3),
         SLT(DEFAULT_INFO3),
         SLE(DEFAULT_INFO3),
         J(BFIELD_ZERO),
-        JR(Regs::Zero),
+        JR(DEFAULT_REG_R),
         LW(DEFAULT_LOAD_SAVE),
         SW(DEFAULT_LOAD_SAVE),
         ADD(DEFAULT_INFO3),
@@ -381,16 +394,17 @@ const fn all_instructions_without_args(
         LA(DEFAULT_INFO2),
         AND(DEFAULT_INFO3),
         XOR(DEFAULT_INFO3),
+        OR(DEFAULT_INFO3),
         NOT(DEFAULT_INFO3),
         SLL(DEFAULT_INFO3),
         SRL(DEFAULT_INFO3),
-        PUBREAD(Regs::Zero),
-        SECREAD(Regs::Zero),
+        PUBREAD(DEFAULT_REG_R),
+        SECREAD(DEFAULT_REG_R),
         PUBSEEK(DEFAULT_INFO2),
         SECSEEK(DEFAULT_INFO2),
-        PRINT(Regs::Zero),
-        EXIT(Regs::Zero),
-        ANSWER(Regs::Zero),
+        PRINT(DEFAULT_REG_R),
+        EXIT(DEFAULT_REG_R),
+        ANSWER(DEFAULT_REG_R),
     ]
 }
 
