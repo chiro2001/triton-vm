@@ -36,7 +36,7 @@ pub struct ParseError<'a> {
 /// A `ParsedInstruction` has `call` addresses encoded as label names.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParsedInstruction<'a> {
-    Instruction(AnInstruction<String, String>, &'a str),
+    Instruction(AnInstruction<String, String, String>, &'a str),
     Label(String, &'a str),
 }
 
@@ -211,17 +211,17 @@ fn label(label_s: &str) -> ParseResult<ParsedInstruction> {
     Ok((s, ParsedInstruction::Label(addr, label_s)))
 }
 
-fn an_instruction(s: &str) -> ParseResult<AnInstruction<String, String>> {
+fn an_instruction(s: &str) -> ParseResult<AnInstruction<String, String, String>> {
     // Control flow
     let beq = branch_instruction("beq", BEQ(Default::default()));
     let bne = branch_instruction("bne", BNE(Default::default()));
     let blt = branch_instruction("blt", BLT(Default::default()));
     let ble = branch_instruction("ble", BLE(Default::default()));
     let j = jump_instruction();
-    let seq = instruction("seq", SEQ);
-    let sne = instruction("sne", SNE);
-    let slt = instruction("slt", SLT);
-    let sle = instruction("sle", SLE);
+    let seq = instruction("seq", SEQ(Default::default()));
+    let sne = instruction("sne", SNE(Default::default()));
+    let slt = instruction("slt", SLT(Default::default()));
+    let sle = instruction("sle", SLE(Default::default()));
     let jr = instruction("jr", JR);
 
     let control_flow = alt((beq, bne, blt, ble, j, seq, sne, slt, sle, jr));
@@ -285,8 +285,8 @@ fn is_instruction_name(s: &str) -> bool {
 
 fn instruction<'a>(
     name: &'a str,
-    instruction: AnInstruction<String, String>,
-) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String>> {
+    instruction: AnInstruction<String, String, String>,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>> {
     move |s: &'a str| {
         let (s, _) = token1(name)(s)?; // require space after instruction name
         Ok((s, instruction.clone()))
@@ -328,7 +328,8 @@ fn instruction<'a>(
 // }
 
 // j __L1__
-fn jump_instruction<'a>() -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String>> {
+fn jump_instruction<'a>() -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>>
+{
     move |s: &'a str| {
         let (s, _) = token1("j")(s)?; // require space before called label
         let (s, addr) = label_addr(s)?;
@@ -341,8 +342,8 @@ fn jump_instruction<'a>() -> impl Fn(&'a str) -> ParseResult<AnInstruction<Strin
 // bgt $t4, $t1, __L1__
 fn branch_instruction<'a>(
     name: &'a str,
-    instruction: AnInstruction<String, String>,
-) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String>> {
+    instruction: AnInstruction<String, String, String>,
+) -> impl Fn(&'a str) -> ParseResult<AnInstruction<String, String, String>> {
     let call_syntax = move |s: &'a str| {
         let (s, _) = token1(name)(s)?; // require space before called label
         let (s, r1) = reg1(s)?;

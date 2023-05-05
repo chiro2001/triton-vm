@@ -16,7 +16,7 @@ use crate::ord_n::Regs;
 use AnInstruction::*;
 
 /// An `Instruction` has `call` addresses encoded as absolute integers.
-pub type Instruction = AnInstruction<BFieldElement, Regs>;
+pub type Instruction = AnInstruction<BFieldElement, Regs, u32>;
 
 pub const ALL_INSTRUCTIONS: [Instruction; Instruction::COUNT] = all_instructions_without_args();
 pub const ALL_INSTRUCTION_NAMES: [&str; Instruction::COUNT] = all_instruction_names();
@@ -27,7 +27,7 @@ pub enum LabelledInstruction {
     /// Instructions belong to the ISA:
     ///
     /// <https://triton-vm.org/spec/isa.html>
-    Instruction(AnInstruction<String, String>),
+    Instruction(AnInstruction<String, String, String>),
 
     /// Labels look like "`<name>:`" and are translated into absolute addresses.
     Label(String),
@@ -51,16 +51,16 @@ pub enum DivinationHint {}
 ///
 /// The type parameter `Dest` describes the type of addresses (absolute or labels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumCountMacro, EnumIter)]
-pub enum AnInstruction<Dest: PartialEq + Default, R: PartialEq + Default> {
+pub enum AnInstruction<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default> {
     // Control flow
     BEQ((R, R, Dest)),
     BNE((R, R, Dest)),
     BLT((R, R, Dest)),
     BLE((R, R, Dest)),
-    SEQ,
-    SNE,
-    SLT,
-    SLE,
+    SEQ((R, R, I)),
+    SNE((R, R, I)),
+    SLT((R, R, I)),
+    SLE((R, R, I)),
     J(Dest),
     JR,
 
@@ -94,7 +94,9 @@ pub enum AnInstruction<Dest: PartialEq + Default, R: PartialEq + Default> {
     ANSWER,
 }
 
-impl<Dest: PartialEq + Default, R: PartialEq + Default> AnInstruction<Dest, R> {
+impl<Dest: PartialEq + Default, R: PartialEq + Default, I: PartialEq + Default>
+    AnInstruction<Dest, R, I>
+{
     // /// Drop the specific argument in favor of a default one.
     // pub fn strip(&self) -> Self {
     //     self.clone()
@@ -107,10 +109,10 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default> AnInstruction<Dest, R> {
             BNE(_) => 1,
             BLT(_) => 2,
             BLE(_) => 3,
-            SEQ => 4,
-            SNE => 5,
-            SLT => 6,
-            SLE => 7,
+            SEQ(_) => 4,
+            SNE(_) => 5,
+            SLT(_) => 6,
+            SLE(_) => 7,
             J(_) => 8,
             JR => 9,
             LW => 10,
@@ -143,10 +145,10 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default> AnInstruction<Dest, R> {
             BNE(_) => "bne",
             BLT(_) => "blt",
             BLE(_) => "ble",
-            SEQ => "seq",
-            SNE => "sne",
-            SLT => "slt",
-            SLE => "sle",
+            SEQ(_) => "seq",
+            SNE(_) => "sne",
+            SLT(_) => "slt",
+            SLE(_) => "sle",
             J(_) => "j",
             JR => "jr",
             LW => "lw",
@@ -194,11 +196,11 @@ impl<Dest: PartialEq + Default, R: PartialEq + Default> AnInstruction<Dest, R> {
     // }
 }
 
-impl<Dest: PartialEq + Default> AnInstruction<Dest, String> {
+impl<Dest: PartialEq + Default> AnInstruction<Dest, String, String> {
     fn map_call_address<F, NewDest: PartialEq + Default>(
         &self,
         f: F,
-    ) -> AnInstruction<NewDest, Regs>
+    ) -> AnInstruction<NewDest, Regs, u32>
     where
         F: Fn(&Dest) -> NewDest,
         Dest: Clone,
@@ -208,10 +210,10 @@ impl<Dest: PartialEq + Default> AnInstruction<Dest, String> {
             BNE((r1, r2, addr)) => BNE((r1.into(), r2.into(), f(addr))),
             BLT((r1, r2, addr)) => BLT((r1.into(), r2.into(), f(addr))),
             BLE((r1, r2, addr)) => BLE((r1.into(), r2.into(), f(addr))),
-            SEQ => SEQ,
-            SNE => SNE,
-            SLT => SLT,
-            SLE => SLE,
+            SEQ((r1, r2, imm)) => SEQ((r1.into(), r2.into(), imm.parse().unwrap())),
+            SNE((r1, r2, imm)) => SNE((r1.into(), r2.into(), imm.parse().unwrap())),
+            SLT((r1, r2, imm)) => SLT((r1.into(), r2.into(), imm.parse().unwrap())),
+            SLE((r1, r2, imm)) => SLE((r1.into(), r2.into(), imm.parse().unwrap())),
             J(label) => J(f(label)),
             JR => JR,
             LW => LW,
@@ -239,8 +241,11 @@ impl<Dest: PartialEq + Default> AnInstruction<Dest, String> {
     }
 }
 
-impl<Dest: Display + PartialEq + Default, R: Display + PartialEq + Default + Clone> Display
-    for AnInstruction<Dest, R>
+impl<
+        Dest: Display + PartialEq + Default,
+        R: Display + PartialEq + Default + Clone,
+        I: Display + PartialEq + Default + Clone,
+    > Display for AnInstruction<Dest, R, I>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())?;
@@ -335,7 +340,7 @@ fn convert_labels_helper(
         LabelledInstruction::Label(_) => vec![],
 
         LabelledInstruction::Instruction(instr) => {
-            let unlabelled_instruction: AnInstruction<BFieldElement, Regs> = instr
+            let unlabelled_instruction: AnInstruction<BFieldElement, Regs, u32> = instr
                 .map_call_address(|label_name| {
                     let label_not_found = format!("Label not found: {label_name}");
                     let absolute_address = label_map.get(label_name).expect(&label_not_found);
@@ -348,18 +353,19 @@ fn convert_labels_helper(
 }
 
 const DEFAULT_BRANCH_INFO: (Regs, Regs, BFieldElement) = (Regs::Zero, Regs::Zero, BFIELD_ZERO);
+const DEFAULT_COMPARISON_INFO: (Regs, Regs, u32) = (Regs::Zero, Regs::Zero, 0);
 
-const fn all_instructions_without_args() -> [AnInstruction<BFieldElement, Regs>; Instruction::COUNT]
-{
+const fn all_instructions_without_args(
+) -> [AnInstruction<BFieldElement, Regs, u32>; Instruction::COUNT] {
     [
         BEQ(DEFAULT_BRANCH_INFO),
         BNE(DEFAULT_BRANCH_INFO),
         BLT(DEFAULT_BRANCH_INFO),
         BLE(DEFAULT_BRANCH_INFO),
-        SEQ,
-        SNE,
-        SLT,
-        SLE,
+        SEQ(DEFAULT_COMPARISON_INFO),
+        SNE(DEFAULT_COMPARISON_INFO),
+        SLT(DEFAULT_COMPARISON_INFO),
+        SLE(DEFAULT_COMPARISON_INFO),
         J(BFIELD_ZERO),
         JR,
         LW,
