@@ -222,42 +222,42 @@ fn an_instruction(s: &str) -> ParseResult<AnInstruction<String, String, String>>
     let sne = instruction("sne", SNE(Default::default()));
     let slt = instruction("slt", SLT(Default::default()));
     let sle = instruction("sle", SLE(Default::default()));
-    let jr = instruction("jr", JR);
+    let jr = instruction("jr", JR(Default::default()));
 
     let control_flow = alt((beq, bne, blt, ble, j, seq, sne, slt, sle, jr));
 
     // Memory access
-    let lw = instruction("lw", LW);
-    let sw = instruction("sw", SW);
+    let lw = instruction("lw", LW(Default::default()));
+    let sw = instruction("sw", SW(Default::default()));
 
     let memory_access = alt((lw, sw));
 
     // Arithmetic on stack instructions
-    let add = instruction("add", ADD);
-    let sub = instruction("sub", SUB);
-    let mult = instruction("mult", MULT);
-    let div = instruction("div", DIV);
-    let mod_ = instruction("mod", MOD);
-    let move_ = instruction("move", MOVE);
-    let la = instruction("la", LA);
-    let and = instruction("and", AND);
-    let xor = instruction("xor", XOR);
-    let not = instruction("not", NOT);
-    let sll = instruction("sll", SLL);
-    let srl = instruction("srl", SRL);
+    let add = instruction("add", ADD(Default::default()));
+    let sub = instruction("sub", SUB(Default::default()));
+    let mult = instruction("mult", MULT(Default::default()));
+    let div = instruction("div", DIV(Default::default()));
+    let mod_ = instruction("mod", MOD(Default::default()));
+    let move_ = instruction("move", MOVE(Default::default()));
+    let la = instruction("la", LA(Default::default()));
+    let and = instruction("and", AND(Default::default()));
+    let xor = instruction("xor", XOR(Default::default()));
+    let not = instruction("not", NOT(Default::default()));
+    let sll = instruction("sll", SLL(Default::default()));
+    let srl = instruction("srl", SRL(Default::default()));
 
     let base_field_arithmetic_on_stack = alt((add, sub, mult, div, mod_, move_, la));
     let bitwise_arithmetic_on_stack = alt((and, xor, not, sll, srl));
     let arithmetic_on_stack = alt((base_field_arithmetic_on_stack, bitwise_arithmetic_on_stack));
 
     // Read/write
-    let pub_read = instruction("pubread", PUBREAD);
-    let sec_read = instruction("secread", SECREAD);
-    let pub_seek = instruction("pubseek", PUBSEEK);
-    let sec_seek = instruction("secseek", SECSEEK);
-    let print = instruction("print", PRINT);
-    let exit = instruction("exit", EXIT);
-    let answer = instruction("answer", ANSWER);
+    let pub_read = instruction("pubread", PUBREAD(Default::default()));
+    let sec_read = instruction("secread", SECREAD(Default::default()));
+    let pub_seek = instruction("pubseek", PUBSEEK(Default::default()));
+    let sec_seek = instruction("secseek", SECSEEK(Default::default()));
+    let print = instruction("print", PRINT(Default::default()));
+    let exit = instruction("exit", EXIT(Default::default()));
+    let answer = instruction("answer", ANSWER(Default::default()));
 
     let read_write = alt((pub_read, sec_read, pub_seek, sec_seek, print, exit, answer));
 
