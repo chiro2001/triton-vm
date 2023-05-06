@@ -1045,61 +1045,62 @@ mod parser_tests {
 
     #[test]
     fn parse_speck_code() {
+        let expected = Program::new(&[
+            Instruction(MOVE(("$t4".to_string(), "32".to_string()))),
+            Instruction(SECREAD("$t2".to_string())),
+            Instruction(SECREAD("$t3".to_string())),
+            Label("__L1__".to_string()),
+            Instruction(SRL(("$t5".to_string(), "$t3".to_string(), "8".to_string()))),
+            Instruction(SLL((
+                "$t6".to_string(),
+                "$t3".to_string(),
+                "56".to_string(),
+            ))),
+            Instruction(OR((
+                "$t6".to_string(),
+                "$t5".to_string(),
+                "$t6".to_string(),
+            ))),
+            Instruction(ADD((
+                "$t3".to_string(),
+                "$t6".to_string(),
+                "$t2".to_string(),
+            ))),
+            Instruction(SECREAD("$t7".to_string())),
+            Instruction(XOR((
+                "$t3".to_string(),
+                "$t3".to_string(),
+                "$t7".to_string(),
+            ))),
+            Instruction(SRL((
+                "$t5".to_string(),
+                "$t2".to_string(),
+                "61".to_string(),
+            ))),
+            Instruction(SLL(("$t6".to_string(), "$t2".to_string(), "3".to_string()))),
+            Instruction(OR((
+                "$t6".to_string(),
+                "$t5".to_string(),
+                "$t6".to_string(),
+            ))),
+            Instruction(XOR((
+                "$t2".to_string(),
+                "$t6".to_string(),
+                "$t3".to_string(),
+            ))),
+            Instruction(ADD(("$t1".to_string(), "$t1".to_string(), "1".to_string()))),
+            Instruction(BGT((
+                "$t4".to_string(),
+                "$t1".to_string(),
+                "__L1__".to_string(),
+            ))),
+            Instruction(PRINT("$t2".to_string())),
+            Instruction(PRINT("$t3".to_string())),
+            Instruction(ANSWER("$t3".to_string())),
+        ]);
         parse_program_prop(TestCase {
             input: crate::instruction::sample_programs::SPECK128,
-            expected: Program::new(&[
-                Instruction(MOVE(("$t4".to_string(), "32".to_string()))),
-                Instruction(SECREAD("$t2".to_string())),
-                Instruction(SECREAD("$t3".to_string())),
-                Label("__L1__".to_string()),
-                Instruction(SRL(("$t5".to_string(), "$t3".to_string(), "8".to_string()))),
-                Instruction(SRL((
-                    "$t6".to_string(),
-                    "$t3".to_string(),
-                    "56".to_string(),
-                ))),
-                Instruction(OR((
-                    "$t6".to_string(),
-                    "$t5".to_string(),
-                    "$t6".to_string(),
-                ))),
-                Instruction(ADD((
-                    "$t3".to_string(),
-                    "$t6".to_string(),
-                    "$t2".to_string(),
-                ))),
-                Instruction(SECREAD("$t7".to_string())),
-                Instruction(XOR((
-                    "$t3".to_string(),
-                    "$t3".to_string(),
-                    "$t7".to_string(),
-                ))),
-                Instruction(SRL((
-                    "$t5".to_string(),
-                    "$t2".to_string(),
-                    "61".to_string(),
-                ))),
-                Instruction(SLL(("$t6".to_string(), "$t2".to_string(), "3".to_string()))),
-                Instruction(OR((
-                    "$t6".to_string(),
-                    "$t5".to_string(),
-                    "$t6".to_string(),
-                ))),
-                Instruction(XOR((
-                    "$t2".to_string(),
-                    "$t6".to_string(),
-                    "$t3".to_string(),
-                ))),
-                Instruction(ADD(("$t1".to_string(), "$t1".to_string(), "1".to_string()))),
-                Instruction(BGT((
-                    "$t4".to_string(),
-                    "$t1".to_string(),
-                    "__L1__".to_string(),
-                ))),
-                Instruction(PRINT("$t2".to_string())),
-                Instruction(PRINT("$t3".to_string())),
-                Instruction(ANSWER("$t3".to_string())),
-            ]),
+            expected,
             message: "parse code err",
         })
     }

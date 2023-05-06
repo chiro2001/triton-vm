@@ -77,11 +77,11 @@ impl From<&str> for Reg {
         if value.len() < 2 {
             panic!("Invalid register name: {}", value);
         }
-        let value = &value[1..];
-        match value.parse::<usize>() {
-            Ok(n) if n < 32 => return REGS[n],
-            _ => {}
-        }
+        // remove '$' prefix
+        let value = match value.strip_prefix('$') {
+            None => value,
+            Some(v) => v,
+        };
         match value {
             "zero" => Reg::Zero,
             "at" => Reg::At,
@@ -115,7 +115,10 @@ impl From<&str> for Reg {
             "sp" => Reg::Sp,
             "fp" => Reg::Fp,
             "ra" => Reg::Ra,
-            _ => panic!("Unknown register: {}", value),
+            _ => match value.parse::<usize>() {
+                Ok(n) if n < 32 => REGS[n],
+                _ => panic!("Unknown register: {}", value),
+            },
         }
     }
 }
