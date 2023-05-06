@@ -336,11 +336,6 @@ impl TryFrom<usize> for Instruction {
     }
 }
 
-// fn ord16_to_bfe(n: &Ord16) -> BFieldElement {
-//     let n: u32 = n.into();
-//     n.into()
-// }
-
 /// Convert a program with labels to a program with absolute positions
 pub fn convert_labels(program: &[LabelledInstruction]) -> Vec<Instruction> {
     let mut label_map = HashMap::<String, usize>::new();

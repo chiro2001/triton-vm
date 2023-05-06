@@ -6,11 +6,9 @@ use nom::branch::alt;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while1;
 use nom::bytes::complete::{is_not, tag};
-// use nom::character::complete::digit1;
 use nom::combinator::cut;
 use nom::combinator::eof;
 use nom::combinator::fail;
-// use nom::combinator::opt;
 use nom::error::context;
 use nom::error::convert_error;
 use nom::error::ErrorKind;
@@ -20,7 +18,6 @@ use nom::multi::many0;
 use nom::multi::many1;
 use nom::Finish;
 use nom::IResult;
-// use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use crate::instruction::AnInstruction;
 use crate::instruction::AnInstruction::*;
@@ -305,15 +302,7 @@ fn an_instruction(s: &str) -> ParseResult<AnInstruction<String, String, String>>
     // backtracking is necessary.
     // let syntax_ambiguous = alt((assert_vector, assert_, divine));
 
-    alt((
-        // opstack_manipulation,
-        control_flow,
-        memory_access,
-        // hashing_related,
-        arithmetic_on_stack,
-        read_write,
-        // syntax_ambiguous,
-    ))(s)
+    alt((control_flow, memory_access, arithmetic_on_stack, read_write))(s)
 }
 
 fn is_instruction_name(s: &str) -> bool {
@@ -436,55 +425,6 @@ fn branch_instruction<'a>(
         Ok((s, r))
     }
 }
-
-// fn field_element(s_orig: &str) -> ParseResult<BFieldElement> {
-//     let (s, negative) = opt(tag("-"))(s_orig)?;
-//     let (s, n) = digit1(s)?;
-//
-//     let mut n: i128 = match n.parse() {
-//         Ok(n) => n,
-//         Err(_err) => {
-//             return context("out-of-bounds constant", fail)(s);
-//         }
-//     };
-//
-//     let quotient = BFieldElement::P as i128;
-//     if n >= quotient {
-//         return context("out-of-bounds constant", fail)(s_orig);
-//     }
-//
-//     if negative.is_some() {
-//         n *= -1;
-//         n += quotient;
-//     }
-//
-//     Ok((s, BFieldElement::new(n as u64)))
-// }
-
-// fn stack_register(s: &str) -> ParseResult<Ord16> {
-//     let (s, n) = digit1(s)?;
-//     let stack_register = match n {
-//         "0" => ST0,
-//         "1" => ST1,
-//         "2" => ST2,
-//         "3" => ST3,
-//         "4" => ST4,
-//         "5" => ST5,
-//         "6" => ST6,
-//         "7" => ST7,
-//         "8" => ST8,
-//         "9" => ST9,
-//         "10" => ST10,
-//         "11" => ST11,
-//         "12" => ST12,
-//         "13" => ST13,
-//         "14" => ST14,
-//         "15" => ST15,
-//         _ => return context("using an out-of-bounds stack register (0-15 exist)", fail)(s),
-//     };
-//
-//     Ok((s, stack_register))
-// }
 
 /// Parse a label address. This is used in "`<label>:`" and in "`call <label>`".
 fn label_addr(s_orig: &str) -> ParseResult<String> {
@@ -880,112 +820,6 @@ mod parser_tests {
         });
     }
 
-    // #[test]
-    // fn parse_program_label_test() {
-    //     parse_program_prop(TestCase {
-    //         input: "foo: call foo",
-    //         expected: Program::new(&[
-    //             Label("foo".to_string()),
-    //             Instruction(Call("foo".to_string())),
-    //         ]),
-    //         message: "parse labels and calls to labels",
-    //     });
-    //
-    //     parse_program_prop(TestCase {
-    //         input: "foo:call foo",
-    //         expected: Program::new(&[
-    //             Label("foo".to_string()),
-    //             Instruction(Call("foo".to_string())),
-    //         ]),
-    //         message: "whitespace is not required after 'label:'",
-    //     });
-    //
-    //     // FIXME: Increase coverage of negative tests for duplicate labels.
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "foo: pop foo: pop call foo",
-    //         expected_error: "duplicate label",
-    //         expected_error_count: 2,
-    //         message: "labels cannot occur twice",
-    //     });
-    //
-    //     // FIXME: Increase coverage of negative tests for missing labels.
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "foo: pop call herp call derp",
-    //         expected_error: "missing label",
-    //         expected_error_count: 2,
-    //         message: "non-existent labels cannot be called",
-    //     });
-    //
-    //     // FIXME: Increase coverage of negative tests for label/keyword overlap.
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "pop: call pop",
-    //         expected_error: "label cannot be named after instruction",
-    //         expected_error_count: 1,
-    //         message: "label names may not overlap with instruction names",
-    //     });
-    //
-    //     parse_program_prop(TestCase {
-    //         input: "pops: call pops",
-    //         expected: Program::new(&[
-    //             Label("pops".to_string()),
-    //             Instruction(Call("pops".to_string())),
-    //         ]),
-    //         message: "labels that share a common prefix with instruction are labels",
-    //     });
-    //
-    //     parse_program_prop(TestCase {
-    //         input: "_call: call _call",
-    //         expected: Program::new(&[
-    //             Label("_call".to_string()),
-    //             Instruction(Call("_call".to_string())),
-    //         ]),
-    //         message: "labels that share a common suffix with instruction are labels",
-    //     });
-    // }
-
-    #[test]
-    fn parse_program_nonexistent_instructions_test() {
-        parse_program_neg_prop(NegativeTestCase {
-            input: "swap 0",
-            expected_error: "instruction `swap` cannot take argument `0`",
-            expected_error_count: 1,
-            message: "instruction `swap` cannot take argument `0`",
-        });
-
-        parse_program_neg_prop(NegativeTestCase {
-            input: "swap 16",
-            expected_error: "expecting label, instruction or eof",
-            expected_error_count: 1,
-            message: "there is no swap 16 instruction",
-        });
-
-        parse_program_neg_prop(NegativeTestCase {
-            input: "dup 16",
-            expected_error: "expecting label, instruction or eof",
-            expected_error_count: 1,
-            message: "there is no dup 16 instruction",
-        });
-    }
-
-    // #[test]
-    // fn parse_program_bracket_syntax_test() {
-    //     parse_program_prop(TestCase {
-    //         input: "foo: [foo]",
-    //         expected: Program::new(&[
-    //             Label("foo".to_string()),
-    //             Instruction(Call("foo".to_string())),
-    //         ]),
-    //         message: "Handle brackets as call syntax sugar",
-    //     });
-    //
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "foo: [bar]",
-    //         expected_error: "missing label",
-    //         expected_error_count: 1,
-    //         message: "Handle missing labels with bracket syntax",
-    //     })
-    // }
-
     #[test]
     fn parse_program_test() {
         for size in 0..100 {
@@ -999,32 +833,6 @@ mod parser_tests {
             }
         }
     }
-
-    // #[test]
-    // fn parse_program_label_must_start_with_alphabetic_character_or_underscore() {
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "1foo: call 1foo",
-    //         expected_error: "expecting label, instruction or eof",
-    //         expected_error_count: 1,
-    //         message: "labels cannot start with a digit",
-    //     });
-    //
-    //     parse_program_neg_prop(NegativeTestCase {
-    //         input: "-foo: call -foo",
-    //         expected_error: "expecting label, instruction or eof",
-    //         expected_error_count: 1,
-    //         message: "labels cannot start with a dash",
-    //     });
-    //
-    //     parse_program_prop(TestCase {
-    //         input: "_foo: call _foo",
-    //         expected: Program::new(&[
-    //             Label("_foo".to_string()),
-    //             Instruction(Call("_foo".to_string())),
-    //         ]),
-    //         message: "labels can start with an underscore",
-    //     });
-    // }
 
     #[test]
     fn parse_branch_ins() {
