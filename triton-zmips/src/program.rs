@@ -1,7 +1,10 @@
+use std::any::Any;
 use std::fmt::Display;
 use std::io::Cursor;
 
 use anyhow::Result;
+use itertools::Itertools;
+use triton_program::{AbstractInstruction, AbstractLabelledInstruction, AbstractProgram, FromCode};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
@@ -14,6 +17,57 @@ use crate::parser::to_labelled;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
+}
+
+impl AbstractProgram for Program {
+    fn to_bwords(&self) -> Vec<BFieldElement> {
+        self.to_bwords()
+    }
+
+    fn len_bwords(&self) -> usize {
+        self.len_bwords()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn get_instructions(&self) -> Vec<Box<dyn AbstractInstruction>> {
+        self.instructions
+            .iter()
+            .map(|x| Box::new(*x) as Box<dyn AbstractInstruction>)
+            .collect()
+    }
+
+    fn to_sequence_(&self) -> Vec<BFieldElement> {
+        self.to_sequence()
+    }
+
+    fn clone_(&self) -> Box<dyn AbstractProgram> {
+        Box::new(self.clone()) as Box<dyn AbstractProgram>
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+}
+
+impl FromCode for Program {
+    fn from_code(code: &str) -> Result<Box<dyn AbstractProgram>>
+    where
+        Self: Sized,
+    {
+        Program::from_code(code).map(|x| Box::new(x) as Box<dyn AbstractProgram>)
+    }
+
+    fn create(input: &[Box<dyn AbstractLabelledInstruction>]) -> Box<dyn AbstractProgram> {
+        let input = input
+            .iter()
+            .map(|x| x.as_any().downcast_ref::<LabelledInstruction>().unwrap())
+            .cloned()
+            .collect_vec();
+        Box::new(Program::new(input.as_slice())) as Box<dyn AbstractProgram>
+    }
 }
 
 impl Display for Program {

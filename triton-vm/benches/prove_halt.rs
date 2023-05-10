@@ -31,7 +31,7 @@ fn prove_halt(_criterion: &mut Criterion) {
 
     // witness
     prof_start!(maybe_profiler, "generate AET");
-    let (aet, output, err) = simulate(&program, vec![], vec![]);
+    let (aet, output, err) = simulate(Box::new(program), vec![], vec![]);
     prof_stop!(maybe_profiler, "generate AET");
     if let Some(error) = err {
         panic!("The VM encountered the following problem: {error}");

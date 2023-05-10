@@ -138,6 +138,17 @@ impl Display for Reg {
         write!(f, "{}", s)
     }
 }
+impl From<Reg> for u32 {
+    fn from(value: Reg) -> Self {
+        (&value).into()
+    }
+}
+impl From<Reg> for usize {
+    fn from(value: Reg) -> Self {
+        let v: u32 = (&value).into();
+        v as usize
+    }
+}
 impl From<&Reg> for u32 {
     fn from(value: &Reg) -> Self {
         match value {
@@ -174,6 +185,12 @@ impl From<&Reg> for u32 {
             Reg::Fp => 30,
             Reg::Ra => 31,
         }
+    }
+}
+impl From<Reg> for BFieldElement {
+    fn from(value: Reg) -> Self {
+        let n: u32 = value.into();
+        n.into()
     }
 }
 impl From<&Reg> for BFieldElement {

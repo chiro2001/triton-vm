@@ -3,6 +3,7 @@ members = [
     "triton-vm",
     "triton-opcodes",
     "triton-zmips",
+    "triton-program",
     "triton-profiler",
     "constraint-evaluation-generator",
 ]

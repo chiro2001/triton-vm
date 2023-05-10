@@ -20,6 +20,7 @@ pub enum InstructionError {
     RunawayInstructionArg,
     UngracefulTermination,
     FailedU32Conversion(BFieldElement),
+    ExecuteReturnFailureValue(BFieldElement)
 }
 
 impl Display for InstructionError {

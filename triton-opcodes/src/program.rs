@@ -1,7 +1,10 @@
-use std::fmt::Display;
+use std::any::Any;
+use std::fmt::{Debug, Display};
 use std::io::Cursor;
 
 use anyhow::Result;
+use itertools::Itertools;
+use triton_program::{AbstractInstruction, AbstractLabelledInstruction, AbstractProgram, FromCode};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
@@ -72,6 +75,7 @@ impl IntoIterator for Program {
 /// should most often be skipped/ignored, e.g. when pretty-printing.
 impl Program {
     /// Create a `Program` from a slice of `Instruction`.
+    // pub fn new(input: &[Box<dyn AbstractLabelledInstruction>]) -> Self {
     pub fn new(input: &[LabelledInstruction]) -> Self {
         let instructions = convert_labels(input)
             .iter()
@@ -83,6 +87,16 @@ impl Program {
 
     /// Create a `Program` by parsing source code.
     pub fn from_code(code: &str) -> Result<Self> {
+        // parse(code)
+        //     .map(|program| {
+        //         Program::new(
+        //             &to_labelled(&program)
+        //                 .into_iter()
+        //                 .map(|x| Box::new(x) as Box<dyn AbstractLabelledInstruction>)
+        //                 .collect::<Vec<_>>(),
+        //         )
+        //     })
+        //     .map_err(|err| anyhow::anyhow!("{}", err))
         parse(code)
             .map(|program| Program::new(&to_labelled(&program)))
             .map_err(|err| anyhow::anyhow!("{}", err))
@@ -116,4 +130,65 @@ impl Program {
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty()
     }
+}
+
+impl AbstractInstruction for Instruction {
+    fn clone_(&self) -> Box<dyn AbstractInstruction> {
+        Box::new(*self) as Box<dyn AbstractInstruction>
+    }
+}
+
+impl AbstractProgram for Program {
+    fn to_bwords(&self) -> Vec<BFieldElement> {
+        self.to_bwords()
+    }
+
+    fn len_bwords(&self) -> usize {
+        self.len_bwords()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn get_instructions(&self) -> Vec<Box<dyn AbstractInstruction>> {
+        self.instructions
+            .iter()
+            .map(|x| Box::new(*x) as Box<dyn AbstractInstruction>)
+            .collect::<Vec<_>>()
+    }
+
+    fn to_sequence_(&self) -> Vec<BFieldElement> {
+        self.to_sequence()
+    }
+
+    fn clone_(&self) -> Box<dyn AbstractProgram> {
+        Box::new(self.clone()) as Box<dyn AbstractProgram>
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+}
+
+impl FromCode for Program {
+    fn from_code(code: &str) -> Result<Box<dyn AbstractProgram>>
+    where
+        Self: Sized,
+    {
+        Program::from_code(code).map(|x| Box::new(x) as Box<dyn AbstractProgram>)
+    }
+
+    fn create(input: &[Box<dyn AbstractLabelledInstruction>]) -> Box<dyn AbstractProgram> {
+        let input = input
+            .iter()
+            .map(|x| x.as_any().downcast_ref::<LabelledInstruction>().unwrap())
+            .cloned()
+            .collect_vec();
+        Box::new(Program::new(input.as_slice())) as Box<dyn AbstractProgram>
+    }
+
+    // fn create(input: &[LabelledInstruction]) -> Box<dyn AbstractProgram> {
+    //     Box::new(Program::new(input)) as Box<dyn AbstractProgram>
+    // }
 }

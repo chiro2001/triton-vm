@@ -2,7 +2,7 @@
 //! of programs written in Triton assembly. The proof system is a zk-STARK, which is a
 //! state-of-the-art ZKPS.
 
-use triton_opcodes::program::Program;
+use triton_program::FromCode;
 pub use twenty_first::shared_math::b_field_element::BFieldElement;
 pub use twenty_first::shared_math::tip5::Digest;
 use twenty_first::shared_math::tip5::Tip5;
@@ -26,6 +26,7 @@ pub mod shared_tests;
 pub mod stark;
 pub mod table;
 pub mod vm;
+pub mod regs_pool;
 
 /// Prove correct execution of a program written in Triton assembly.
 /// This is a convenience function, abstracting away the details of the STARK construction.
@@ -41,11 +42,14 @@ pub mod vm;
 /// `assert` instruction, proof generation will fail.
 ///
 /// The default STARK parameters used by Triton VM give a (conjectured) security level of 160 bits.
-pub fn prove(
+pub fn prove<T>(
     source_code: &str,
     public_input: &[u64],
     secret_input: &[u64],
-) -> (StarkParameters, Claim, Proof) {
+) -> (StarkParameters, Claim, Proof)
+where
+    T: FromCode,
+{
     let canonical_representation_error =
         "input must contain only elements in canonical representation, i.e., \
         elements smaller than the prime field's modulus 2^64 - 2^32 + 1.";
@@ -69,14 +73,14 @@ pub fn prove(
         .collect::<Vec<_>>();
 
     // Parse the Triton assembly into a program.
-    let program = Program::from_code(source_code).unwrap();
+    let program = T::from_code(source_code).unwrap();
 
     // Generate
     // - the witness required for proof generation, i.e., the Algebraic Execution Trace (AET),
     // - the (public) output of the program, and
     // - an error, if the program crashes.
     let (aet, public_output, maybe_error) =
-        vm::simulate(&program, public_input_bfe, secret_input_bfe);
+        vm::simulate(program.clone(), public_input_bfe, secret_input_bfe);
 
     // Check for VM crashes, for example due to failing `assert` instructions or an out-of-bounds
     // instruction pointer. Crashes can occur if any of the two inputs does not conform to the

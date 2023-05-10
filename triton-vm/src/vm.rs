@@ -1,7 +1,7 @@
 use std::collections::hash_map::Entry::*;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 use anyhow::Result;
 use ndarray::s;
@@ -26,13 +26,15 @@ use triton_opcodes::instruction::Instruction;
 use triton_opcodes::ord_n::Ord16;
 use triton_opcodes::ord_n::Ord16::*;
 use triton_opcodes::ord_n::Ord8;
-use triton_opcodes::program::Program;
+use triton_program::AbstractProgram;
+use triton_zmips::regs::RegA;
 
 use crate::error::vm_err;
 use crate::error::vm_fail;
 use crate::error::InstructionError::InstructionPointerOverflow;
 use crate::error::InstructionError::*;
 use crate::op_stack::OpStack;
+use crate::regs_pool::RegsPool;
 use crate::table::hash_table;
 use crate::table::hash_table::HashTable;
 use crate::table::processor_table;
@@ -45,18 +47,20 @@ use crate::vm::VMOutput::*;
 /// The number of helper variable registers
 pub const HV_REGISTER_COUNT: usize = 4;
 
-#[derive(Debug, Default, Clone)]
-pub struct VMState<'pgm> {
+#[derive(Debug, Clone)]
+pub struct VMState<'pgm, T: Debug + Clone + PartialEq> {
     // Memory
     /// The **program memory** stores the instructions (and their arguments) of the program
     /// currently being executed by Triton VM. It is read-only.
-    pub program: &'pgm [Instruction],
+    pub program: &'pgm [T],
 
     /// The read-write **random-access memory** allows Triton VM to store arbitrary data.
     pub ram: HashMap<BFieldElement, BFieldElement>,
 
     /// The **Op-stack memory** stores Triton VM's entire operational stack.
     pub op_stack: OpStack,
+
+    pub regs_pool: RegsPool,
 
     /// The **Jump-stack memory** stores the entire jump stack.
     pub jump_stack: Vec<(BFieldElement, BFieldElement)>,
@@ -101,16 +105,504 @@ pub enum VMOutput {
 
     /// Executed u32 instruction as well as its left-hand side and right-hand side
     U32TableEntries(Vec<(Instruction, BFieldElement, BFieldElement)>),
+
+    FinalAnswer(BFieldElement),
 }
 
-impl<'pgm> VMState<'pgm> {
+impl<'pgm, T: Debug + PartialEq + Clone> VMState<'pgm, T> {
+    pub fn current_instruction(&self) -> Result<T> {
+        self.program
+            .get(self.instruction_pointer)
+            .ok_or_else(|| vm_fail(InstructionPointerOverflow(self.instruction_pointer)))
+            .cloned()
+    }
+}
+
+impl<'pgm, T: Debug + PartialEq + Clone> Default for VMState<'pgm, T> {
+    fn default() -> Self {
+        Self {
+            program: &[],
+            ram: Default::default(),
+            op_stack: Default::default(),
+            regs_pool: RegsPool::default(),
+            jump_stack: vec![],
+            cycle_count: 0,
+            instruction_pointer: 0,
+            previous_instruction: Default::default(),
+            ramp: 0,
+            sponge_state: [BFieldElement::default(); tip5::STATE_SIZE],
+            halting: false,
+        }
+    }
+}
+
+// impl<'pgm> VMState<'pgm, Box<dyn AbstractInstruction>> {
+//     pub fn new(program: &'pgm [Box<dyn AbstractInstruction>]) -> Self {
+//         // let program = program.get_instructions();
+//         Self {
+//             program,
+//             ..VMState::default()
+//         }
+//     }
+// }
+
+impl<'pgm, T: Debug + PartialEq + Clone> VMState<'pgm, T> {
+    pub fn new(program: &'pgm [T]) -> Self {
+        // let program = program.get_instructions();
+        Self {
+            program,
+            ..VMState::default()
+        }
+    }
+}
+
+impl<'pgm> VMState<'pgm, triton_zmips::instruction::Instruction> {
+    pub fn new_zmips(program: &'pgm [triton_zmips::instruction::Instruction]) -> Self {
+        // let program = program.get_instructions();
+        Self {
+            program,
+            ..VMState::default()
+        }
+    }
+    pub fn to_processor_row(&self) -> Array1<BFieldElement> {
+        Array1::zeros(processor_table::BASE_WIDTH)
+    }
+    /// Perform the state transition as a mutable operation on `self`.
+    pub fn step_mut(
+        &mut self,
+        stdin: &mut Vec<BFieldElement>,
+        secret_in: &mut Vec<BFieldElement>,
+    ) -> Result<Option<VMOutput>> {
+        // All instructions increase the cycle count
+        self.cycle_count += 1;
+        let mut vm_output = None;
+        self.previous_instruction = match self.current_instruction() {
+            Ok(instruction) => instruction.opcode_b(),
+            // trying to read past the end of the program doesn't change the previous instruction
+            Err(_) => self.previous_instruction,
+        };
+        use triton_zmips::instruction::Instruction;
+
+        match self.current_instruction()? {
+            Instruction::BEQ((r1, r2, addr)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                self.instruction_pointer = if r1.value() == r2.value() {
+                    addr.value() as usize
+                } else {
+                    self.instruction_pointer + 1
+                };
+            }
+            Instruction::BNE((r1, r2, addr)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                self.instruction_pointer = if r1.value() != r2.value() {
+                    addr.value() as usize
+                } else {
+                    self.instruction_pointer + 1
+                };
+            }
+            Instruction::BLT((r1, r2, addr)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                self.instruction_pointer = if r1.value() < r2.value() {
+                    addr.value() as usize
+                } else {
+                    self.instruction_pointer + 1
+                };
+            }
+            Instruction::BLE((r1, r2, addr)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                self.instruction_pointer = if r1.value() <= r2.value() {
+                    addr.value() as usize
+                } else {
+                    self.instruction_pointer + 1
+                };
+            }
+            Instruction::BGT((r1, r2, addr)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                self.instruction_pointer = if r1.value() > r2.value() {
+                    addr.value() as usize
+                } else {
+                    self.instruction_pointer + 1
+                };
+            }
+            Instruction::SEQ((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v2] =
+                            BFieldElement::new((r1.value() == imm as u64) as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v2] = BFieldElement::new(
+                            (r1.value() == BFieldElement::from(a).value()) as u64,
+                        );
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SNE((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v2] =
+                            BFieldElement::new((r1.value() != imm as u64) as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v2] = BFieldElement::new(
+                            (r1.value() != BFieldElement::from(a).value()) as u64,
+                        );
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SLT((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v2] =
+                            BFieldElement::new((r1.value() < imm as u64) as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v2] = BFieldElement::new(
+                            (r1.value() < BFieldElement::from(a).value()) as u64,
+                        );
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SLE((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v2] =
+                            BFieldElement::new((r1.value() <= imm as u64) as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v2] = BFieldElement::new(
+                            (r1.value() <= BFieldElement::from(a).value()) as u64,
+                        );
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::J(addr) => {
+                self.instruction_pointer = addr.value() as usize;
+            }
+            Instruction::JR(r) => {
+                self.instruction_pointer = BFieldElement::from(r).value() as usize;
+            }
+            Instruction::LW((r1, a, r2)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        let addr = BFieldElement::from((imm as u64 + r2.value()) as u64);
+                        self.regs_pool.regs[v1] = self.memory_get(&addr);
+                    }
+                    RegA::RegName(a) => {
+                        let addr = BFieldElement::from(
+                            (BFieldElement::from(a).value() + r2.value()) as u64,
+                        );
+                        self.regs_pool.regs[v1] = self.memory_get(&addr);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SW((r1, a, r2)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r1: &BFieldElement = &self.regs_pool.regs[v1];
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        let addr = BFieldElement::new((imm as u64 + r2.value()) as u64);
+                        self.memory_set(addr, *r1);
+                    }
+                    RegA::RegName(a) => {
+                        let addr = BFieldElement::new(
+                            (BFieldElement::from(a).value() + r2.value()) as u64,
+                        );
+                        self.memory_set(addr, *r1);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::ADD((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = *r2 + BFieldElement::from(imm);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] = *r2 + BFieldElement::from(a);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SUB((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = *r2 - BFieldElement::from(imm);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] = *r2 - BFieldElement::from(a);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::MULT((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = *r2 * BFieldElement::from(imm);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] = *r2 * BFieldElement::from(a);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::DIV((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = *r2 / BFieldElement::from(imm);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] = *r2 / BFieldElement::from(a);
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::MOD((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        // FIXME: this is may not the correct way to do it...
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() % (imm as u64));
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() % BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::MOVE((r, a)) => {
+                let v1: usize = r.into();
+                match a {
+                    RegA::Imm(imm) => self.regs_pool.regs[v1] = BFieldElement::from(imm),
+                    RegA::RegName(r2) => {
+                        let v2: usize = r2.into();
+                        self.regs_pool.regs[v1] = self.regs_pool.regs[v2];
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::LA((r, a)) => {
+                let v1: usize = r.into();
+                self.regs_pool.regs[v1] = a;
+                self.instruction_pointer += 1;
+            }
+            Instruction::AND((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() & imm as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() & BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::XOR((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() ^ imm as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() ^ BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::OR((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() | imm as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() ^ BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::NOT((r1, _r2, a)) => {
+                let v1: usize = r1.into();
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(!(imm as u64) & (usize::MAX) as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(
+                            BFieldElement::from(a).value() & (usize::MAX) as u64,
+                        );
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SLL((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() << imm as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() << BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::SRL((r1, r2, a)) => {
+                let v1: usize = r1.into();
+                let v2: usize = r2.into();
+                let r2: &BFieldElement = &self.regs_pool.regs[v2];
+                match a {
+                    RegA::Imm(imm) => {
+                        self.regs_pool.regs[v1] = BFieldElement::from(r2.value() >> imm as u64);
+                    }
+                    RegA::RegName(a) => {
+                        self.regs_pool.regs[v1] =
+                            BFieldElement::from(r2.value() >> BFieldElement::from(a).value());
+                    }
+                }
+                self.instruction_pointer += 1;
+            }
+            Instruction::PUBREAD(r) => {
+                let v1: usize = r.into();
+                self.regs_pool.regs[v1] = stdin.remove(0);
+                self.instruction_pointer += 1;
+            }
+            Instruction::SECREAD(r) => {
+                let v1: usize = r.into();
+                self.regs_pool.regs[v1] = secret_in.remove(0);
+                self.instruction_pointer += 1;
+            }
+            // TODO
+            Instruction::PUBSEEK(_) => {}
+            Instruction::SECSEEK(_) => {}
+            Instruction::PRINT(r) => {
+                let v1: usize = r.into();
+                let r = self.regs_pool.regs[v1];
+                vm_output = Some(WriteOutputSymbol(r));
+                self.instruction_pointer += 1;
+            }
+            Instruction::EXIT(r) => {
+                let v1: usize = r.into();
+                self.instruction_pointer += 1;
+                return vm_err(ExecuteReturnFailureValue(self.regs_pool.regs[v1]));
+            }
+            Instruction::ANSWER(r) => {
+                let v1: usize = r.into();
+                let r = self.regs_pool.regs[v1];
+                vm_output = Some(FinalAnswer(r));
+                self.instruction_pointer += 1;
+            }
+        }
+
+        // Check that no instruction left the OpStack with too few elements
+        if self.op_stack.is_too_shallow() {
+            return vm_err(OpStackTooShallow);
+        }
+
+        Ok(vm_output)
+    }
+    fn memory_get(&self, mem_addr: &BFieldElement) -> BFieldElement {
+        self.ram
+            .get(mem_addr)
+            .copied()
+            .unwrap_or_else(BFieldElement::zero)
+    }
+    fn memory_set(&mut self, mem_addr: BFieldElement, data: BFieldElement) {
+        self.ram.insert(mem_addr, data);
+    }
+}
+
+impl<'pgm> VMState<'pgm, triton_zmips::instruction::Instruction> {
+    /// Given a state, compute `(next_state, vm_output)`.
+    pub fn step(
+        &self,
+        stdin: &mut Vec<BFieldElement>,
+        secret_in: &mut Vec<BFieldElement>,
+    ) -> Result<(
+        VMState<'pgm, triton_zmips::instruction::Instruction>,
+        Option<VMOutput>,
+    )> {
+        let mut next_state = self.clone();
+        next_state
+            .step_mut(stdin, secret_in)
+            .map(|vm_output| (next_state, vm_output))
+    }
+}
+
+impl<'pgm> VMState<'pgm, Instruction> {
     /// Create initial `VMState` for a given `program`
     ///
     /// Since `program` is read-only across individual states, and multiple
     /// inner helper functions refer to it, a read-only reference is kept in
     /// the struct.
-    pub fn new(program: &'pgm Program) -> Self {
-        let program = &program.instructions;
+    pub fn new_triton(program: &'pgm [Instruction]) -> Self {
+        // let program = program.get_instructions();
         Self {
             program,
             ..VMState::default()
@@ -122,7 +614,7 @@ impl<'pgm> VMState<'pgm> {
         &self,
         stdin: &mut Vec<BFieldElement>,
         secret_in: &mut Vec<BFieldElement>,
-    ) -> Result<(VMState<'pgm>, Option<VMOutput>)> {
+    ) -> Result<(VMState<'pgm, Instruction>, Option<VMOutput>)> {
         let mut next_state = self.clone();
         next_state
             .step_mut(stdin, secret_in)
@@ -643,13 +1135,6 @@ impl<'pgm> VMState<'pgm> {
             .unwrap_or_else(BFieldElement::zero)
     }
 
-    pub fn current_instruction(&self) -> Result<Instruction> {
-        self.program
-            .get(self.instruction_pointer)
-            .ok_or_else(|| vm_fail(InstructionPointerOverflow(self.instruction_pointer)))
-            .copied()
-    }
-
     // Return the next instruction on the tape, skipping arguments
     //
     // Note that this is not necessarily the next instruction to execute,
@@ -787,7 +1272,8 @@ impl<'pgm> VMState<'pgm> {
     }
 }
 
-impl<'pgm> Display for VMState<'pgm> {
+// impl<'pgm, T: Debug + PartialEq + Clone> Display for VMState<'pgm, T> {
+impl<'pgm> Display for VMState<'pgm, Instruction> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.current_instruction() {
             Ok(_) => {
@@ -809,7 +1295,7 @@ impl<'pgm> Display for VMState<'pgm> {
 ///
 /// See also [`debug`] and [`run`].
 pub fn simulate(
-    program: &Program,
+    program: Box<dyn AbstractProgram>,
     mut stdin: Vec<BFieldElement>,
     mut secret_in: Vec<BFieldElement>,
 ) -> (
@@ -818,45 +1304,105 @@ pub fn simulate(
     Option<anyhow::Error>,
 ) {
     let mut aet = AlgebraicExecutionTrace::new(program.clone());
-    let mut state = VMState::new(program);
-    assert_eq!(program.len_bwords(), aet.instruction_multiplicities.len());
+    match program
+        .as_any()
+        .downcast_ref::<triton_opcodes::program::Program>()
+    {
+        None => {
+            let program = program
+                .as_any()
+                .downcast_ref::<triton_zmips::program::Program>()
+                .unwrap();
+            let mut state = VMState::new_zmips(&program.instructions);
+            // let mut state = VMState::new(program.get_instructions());
+            assert_eq!(program.len_bwords(), aet.instruction_multiplicities.len());
 
-    let mut stdout = vec![];
-    while !state.halting {
-        aet.processor_trace
-            .push_row(state.to_processor_row().view())
-            .expect("shapes must be identical");
+            let mut stdout = vec![];
+            while !state.halting {
+                aet.processor_trace
+                    .push_row(state.to_processor_row().view())
+                    .expect("shapes must be identical");
 
-        if state.instruction_pointer < aet.instruction_multiplicities.len() {
-            aet.instruction_multiplicities[state.instruction_pointer] += 1;
-        } else {
-            let failure_reason = vm_fail(InstructionPointerOverflow(state.instruction_pointer));
-            return (aet, stdout, Some(failure_reason));
-        }
+                if state.instruction_pointer < aet.instruction_multiplicities.len() {
+                    aet.instruction_multiplicities[state.instruction_pointer] += 1;
+                } else {
+                    let failure_reason =
+                        vm_fail(InstructionPointerOverflow(state.instruction_pointer));
+                    return (aet, stdout, Some(failure_reason));
+                }
 
-        let vm_output = match state.step_mut(&mut stdin, &mut secret_in) {
-            Err(err) => return (aet, stdout, Some(err)),
-            Ok(vm_output) => vm_output,
-        };
-        match vm_output {
-            Some(Tip5Trace(Hash, tip5_trace)) => aet.append_hash_trace(*tip5_trace),
-            Some(Tip5Trace(instruction, tip5_trace)) => {
-                aet.append_sponge_trace(instruction, *tip5_trace)
-            }
-            Some(U32TableEntries(u32_entries)) => {
-                for u32_entry in u32_entries {
-                    aet.u32_entries
-                        .entry(u32_entry)
-                        .and_modify(|multiplicity| *multiplicity += 1)
-                        .or_insert(1);
+                let vm_output = match state.step_mut(&mut stdin, &mut secret_in) {
+                    Err(err) => return (aet, stdout, Some(err)),
+                    Ok(vm_output) => vm_output,
+                };
+                match vm_output {
+                    Some(Tip5Trace(Hash, tip5_trace)) => aet.append_hash_trace(*tip5_trace),
+                    Some(Tip5Trace(instruction, tip5_trace)) => {
+                        aet.append_sponge_trace(instruction, *tip5_trace)
+                    }
+                    Some(U32TableEntries(u32_entries)) => {
+                        for u32_entry in u32_entries {
+                            aet.u32_entries
+                                .entry(u32_entry)
+                                .and_modify(|multiplicity| *multiplicity += 1)
+                                .or_insert(1);
+                        }
+                    }
+                    Some(WriteOutputSymbol(written_word)) => stdout.push(written_word),
+                    None => (),
+                    _ => {}
                 }
             }
-            Some(WriteOutputSymbol(written_word)) => stdout.push(written_word),
-            None => (),
+
+            (aet, stdout, None)
+        }
+        Some(program) => {
+            let mut state = VMState::new_triton(&program.instructions);
+            // let mut state = VMState::new(program.get_instructions());
+            assert_eq!(program.len_bwords(), aet.instruction_multiplicities.len());
+
+            let mut stdout = vec![];
+            while !state.halting {
+                aet.processor_trace
+                    .push_row(state.to_processor_row().view())
+                    .expect("shapes must be identical");
+
+                if state.instruction_pointer < aet.instruction_multiplicities.len() {
+                    aet.instruction_multiplicities[state.instruction_pointer] += 1;
+                } else {
+                    let failure_reason =
+                        vm_fail(InstructionPointerOverflow(state.instruction_pointer));
+                    return (aet, stdout, Some(failure_reason));
+                }
+
+                let vm_output = match state.step_mut(&mut stdin, &mut secret_in) {
+                    Err(err) => return (aet, stdout, Some(err)),
+                    Ok(vm_output) => vm_output,
+                };
+                match vm_output {
+                    Some(Tip5Trace(Hash, tip5_trace)) => aet.append_hash_trace(*tip5_trace),
+                    Some(Tip5Trace(instruction, tip5_trace)) => {
+                        aet.append_sponge_trace(instruction, *tip5_trace)
+                    }
+                    Some(U32TableEntries(u32_entries)) => {
+                        for u32_entry in u32_entries {
+                            aet.u32_entries
+                                .entry(u32_entry)
+                                .and_modify(|multiplicity| *multiplicity += 1)
+                                .or_insert(1);
+                        }
+                    }
+                    Some(WriteOutputSymbol(written_word)) => stdout.push(written_word),
+                    Some(FinalAnswer(answer)) => {
+                        // aet.final_answer = Some(answer);
+                    }
+                    None => (),
+                }
+            }
+
+            (aet, stdout, None)
         }
     }
-
-    (aet, stdout, None)
 }
 
 /// Similar to [`run`], but also returns a [`Vec`] of [`VMState`]s, one for each step of the VM.
@@ -874,64 +1420,65 @@ pub fn simulate(
 /// it halts.
 ///
 /// See also [`simulate`].
-pub fn debug<'pgm>(
-    program: &'pgm Program,
-    mut stdin: Vec<BFieldElement>,
-    mut secret_in: Vec<BFieldElement>,
-    initial_state: Option<VMState<'pgm>>,
-    num_cycles_to_execute: Option<u32>,
-) -> (
-    Vec<VMState<'pgm>>,
-    Vec<BFieldElement>,
-    Option<anyhow::Error>,
-) {
-    let mut states = vec![];
-    let mut stdout = vec![];
-    let mut current_state = initial_state.unwrap_or(VMState::new(program));
-    let max_cycles = match num_cycles_to_execute {
-        Some(number_of_cycles) => current_state.cycle_count + number_of_cycles,
-        None => u32::MAX,
-    };
-
-    assert_eq!(
-        current_state.program, program.instructions,
-        "The (optional) initial state must be for the given program."
-    );
-
-    while !current_state.halting && current_state.cycle_count < max_cycles {
-        states.push(current_state.clone());
-        let step = current_state.step(&mut stdin, &mut secret_in);
-        let (next_state, vm_output) = match step {
-            Err(err) => return (states, stdout, Some(err)),
-            Ok((next_state, vm_output)) => (next_state, vm_output),
-        };
-
-        if let Some(WriteOutputSymbol(written_word)) = vm_output {
-            stdout.push(written_word);
-        }
-        current_state = next_state;
-    }
-
-    (states, stdout, None)
-}
+// pub fn debug<'pgm, T: Debug + PartialEq + Clone>(
+//     program: &'pgm [T],
+//     mut stdin: Vec<BFieldElement>,
+//     mut secret_in: Vec<BFieldElement>,
+//     initial_state: Option<VMState<'pgm, T>>,
+//     num_cycles_to_execute: Option<u32>,
+// ) -> (
+//     Vec<VMState<'pgm, T>>,
+//     Vec<BFieldElement>,
+//     Option<anyhow::Error>,
+// ) {
+//     let mut states = vec![];
+//     let mut stdout = vec![];
+//     let mut current_state = initial_state.unwrap_or(VMState::new(program));
+//     let max_cycles = match num_cycles_to_execute {
+//         Some(number_of_cycles) => current_state.cycle_count + number_of_cycles,
+//         None => u32::MAX,
+//     };
+//
+//     assert_eq!(
+//         current_state.program, program,
+//         "The (optional) initial state must be for the given program."
+//     );
+//
+//     // while !current_state.halting && current_state.cycle_count < max_cycles {
+//     //     states.push(current_state.clone());
+//     //     let step = current_state.step(&mut stdin, &mut secret_in);
+//     //     let (next_state, vm_output) = match step {
+//     //         Err(err) => return (states, stdout, Some(err)),
+//     //         Ok((next_state, vm_output)) => (next_state, vm_output),
+//     //     };
+//     //
+//     //     if let Some(WriteOutputSymbol(written_word)) = vm_output {
+//     //         stdout.push(written_word);
+//     //     }
+//     //     current_state = next_state;
+//     // }
+//
+//     (states, stdout, None)
+// }
 
 /// Run Triton VM on the given [`Program`] with the given public and secret input.
 ///
 /// See also [`simulate`] and [`debug`].
 pub fn run(
-    program: &Program,
+    program: Box<dyn AbstractProgram>,
     mut stdin: Vec<BFieldElement>,
     mut secret_in: Vec<BFieldElement>,
 ) -> Result<Vec<BFieldElement>, anyhow::Error> {
-    let mut state = VMState::new(program);
-    let mut stdout = vec![];
+    let mut state = VMState::new(&program.get_instructions());
+    // let mut stdout = vec![];
+    let stdout = vec![];
 
-    while !state.halting {
-        let vm_output = state.step_mut(&mut stdin, &mut secret_in)?;
-        if let Some(WriteOutputSymbol(written_word)) = vm_output {
-            stdout.push(written_word);
-        }
-    }
+    // while !state.halting {
+    //     let vm_output = state.step_mut(&mut stdin, &mut secret_in)?;
+    //     if let Some(WriteOutputSymbol(written_word)) = vm_output {
+    //         stdout.push(written_word);
+    //     }
+    // }
 
     Ok(stdout)
 }
@@ -943,7 +1490,7 @@ pub fn run(
 #[derive(Debug, Clone)]
 pub struct AlgebraicExecutionTrace {
     /// The program that was executed in order to generate the trace.
-    pub program: Program,
+    pub program: Box<dyn AbstractProgram>,
 
     /// The number of times each instruction has been executed.
     ///
@@ -976,7 +1523,7 @@ pub struct AlgebraicExecutionTrace {
 }
 
 impl AlgebraicExecutionTrace {
-    pub fn new(program: Program) -> Self {
+    pub fn new(program: Box<dyn AbstractProgram>) -> Self {
         let instruction_multiplicities = vec![0_u32; program.len_bwords()];
         Self {
             program,
@@ -1066,6 +1613,7 @@ pub mod triton_vm_tests {
     use rand::rngs::ThreadRng;
     use rand::Rng;
     use rand::RngCore;
+    use triton_opcodes::program::Program;
     use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
     use twenty_first::shared_math::other::log_2_floor;
     use twenty_first::shared_math::other::random_elements;
@@ -1136,7 +1684,7 @@ pub mod triton_vm_tests {
 
         let stdin = vec![BFieldElement::new(42), BFieldElement::new(56)];
 
-        let (aet, stdout, err) = simulate(&program, stdin, vec![]);
+        let (aet, stdout, err) = simulate(Box::new(program), stdin, vec![]);
 
         println!(
             "VM output: [{}]",
@@ -1164,7 +1712,7 @@ pub mod triton_vm_tests {
 
         println!("{program}");
 
-        let (aet, _, err) = simulate(&program, vec![], vec![]);
+        let (aet, _, err) = simulate(Box::new(program), vec![], vec![]);
 
         println!("{err:?}");
         for row in aet.processor_trace.rows() {
@@ -1178,7 +1726,7 @@ pub mod triton_vm_tests {
         let program = Program::from_code(code).unwrap();
 
         let stdin = vec![42_u64.into(), 56_u64.into()];
-        let (_, stdout, err) = simulate(&program, stdin, vec![]);
+        let (_, stdout, err) = simulate(Box::new(program), stdin, vec![]);
 
         let stdout = Array1::from(stdout);
         println!("VM output: [{}]", pretty_print_array_view(stdout.view()));
@@ -2026,7 +2574,7 @@ pub mod triton_vm_tests {
             write_io write_io write_io write_io write_io write_io write_io
         ";
         let program = Program::from_code(code).unwrap();
-        let (aet, _out, _err) = simulate(&program, vec![], vec![]);
+        let (aet, _out, _err) = simulate(Box::new(program), vec![], vec![]);
         let last_processor_row = aet.processor_trace.rows().into_iter().last().unwrap();
         let st0 = last_processor_row[ProcessorBaseTableColumn::ST0.base_table_index()];
         assert_eq!(BFIELD_ZERO, st0);
@@ -2038,7 +2586,7 @@ pub mod triton_vm_tests {
     fn run_tvm_halt_then_do_stuff_test() {
         let halt_then_do_stuff = "halt push 1 push 2 add invert write_io";
         let program = Program::from_code(halt_then_do_stuff).unwrap();
-        let (aet, _out, err) = simulate(&program, vec![], vec![]);
+        let (aet, _out, err) = simulate(Box::new(program), vec![], vec![]);
         if let Some(err) = err {
             panic!("Simulation failed: {err}");
         }
@@ -2064,7 +2612,7 @@ pub mod triton_vm_tests {
             halt
             ";
         let program = Program::from_code(basic_ram_read_write_code).unwrap();
-        let (aet, _out, err) = simulate(&program, vec![], vec![]);
+        let (aet, _out, err) = simulate(Box::new(program), vec![], vec![]);
         if let Some(e) = err {
             panic!("Error: {e}");
         }
@@ -2101,7 +2649,7 @@ pub mod triton_vm_tests {
             halt
         ";
         let program = Program::from_code(edgy_ram_writes_code).unwrap();
-        let (aet, _out, err) = simulate(&program, vec![], vec![]);
+        let (aet, _out, err) = simulate(Box::new(program), vec![], vec![]);
         if let Some(e) = err {
             panic!("Error: {e}");
         }
@@ -2147,7 +2695,7 @@ pub mod triton_vm_tests {
         let program = Program::from_code(sample_weights_code).unwrap();
         println!("Successfully parsed the program.");
         let input_symbols = vec![BFieldElement::new(11)];
-        let (aet, _out, err) = simulate(&program, input_symbols, vec![]);
+        let (aet, _out, err) = simulate(Box::new(program), input_symbols, vec![]);
 
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
@@ -2302,7 +2850,7 @@ pub mod triton_vm_tests {
             leafs[55].values()[order[4]],
         ];
 
-        let (aet, _out, err) = simulate(&program, input, secret_input);
+        let (aet, _out, err) = simulate(Box::new(program), input, secret_input);
 
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
@@ -2331,7 +2879,7 @@ pub mod triton_vm_tests {
         let program = Program::from_code(get_colinear_y_code).unwrap();
         println!("Successfully parsed the program.");
         let input_symbols = [7, 2, 1, 3, 4].map(BFieldElement::new).to_vec();
-        let (aet, out, err) = simulate(&program, input_symbols, vec![]);
+        let (aet, out, err) = simulate(Box::new(program), input_symbols, vec![]);
         assert_eq!(BFieldElement::new(4), out[0]);
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
@@ -2361,7 +2909,7 @@ pub mod triton_vm_tests {
             ";
 
         let program = Program::from_code(countdown_code).unwrap();
-        let (_aet, out, err) = simulate(&program, vec![], vec![]);
+        let (_aet, out, err) = simulate(Box::new(program), vec![], vec![]);
 
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
@@ -2374,7 +2922,7 @@ pub mod triton_vm_tests {
     fn run_tvm_fibonacci_tvm() {
         let code = FIBONACCI_SEQUENCE;
         let program = Program::from_code(code).unwrap();
-        let (_aet, out, err) = simulate(&program, vec![7_u64.into()], vec![]);
+        let (_aet, out, err) = simulate(Box::new(program), vec![7_u64.into()], vec![]);
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
         }
@@ -2388,7 +2936,11 @@ pub mod triton_vm_tests {
         let program = Program::from_code(code).unwrap();
 
         println!("{program}");
-        let (_aet, out, _err) = simulate(&program, vec![42_u64.into(), 56_u64.into()], vec![]);
+        let (_aet, out, _err) = simulate(
+            Box::new(program),
+            vec![42_u64.into(), 56_u64.into()],
+            vec![],
+        );
 
         let expected = BFieldElement::new(14);
         let actual = *out.last().unwrap();
@@ -2399,13 +2951,13 @@ pub mod triton_vm_tests {
     fn run_tvm_swap_test() {
         let code = "push 1 push 2 swap 1 halt";
         let program = Program::from_code(code).unwrap();
-        simulate(&program, vec![], vec![]);
+        simulate(Box::new(program), vec![], vec![]);
     }
 
     #[test]
     fn read_mem_unitialized() {
         let program = Program::from_code("read_mem halt").unwrap();
-        let (aet, _out, err) = simulate(&program, vec![], vec![]);
+        let (aet, _out, err) = simulate(Box::new(program), vec![], vec![]);
         assert!(err.is_none(), "Reading from uninitialized memory address");
         assert_eq!(2, aet.processor_trace.nrows());
     }
@@ -2413,7 +2965,7 @@ pub mod triton_vm_tests {
     #[test]
     fn program_without_halt_test() {
         let program = Program::from_code("nop").unwrap();
-        let (_aet, _out, err) = simulate(&program, vec![], vec![]);
+        let (_aet, _out, err) = simulate(Box::new(program), vec![], vec![]);
         let Some(err) = err else {
             panic!("Program without halt must fail.");
         };
@@ -2444,7 +2996,7 @@ pub mod triton_vm_tests {
         .map(BFieldElement::new)
         .to_vec();
         let secret_in = vec![];
-        let (_aet, _stdout, err) = simulate(&program, stdin, secret_in);
+        let (_aet, _stdout, err) = simulate(Box::new(program.clone()), stdin, secret_in);
 
         if let Some(e) = err {
             panic!("The VM encountered an error: {e}");
@@ -2467,7 +3019,7 @@ pub mod triton_vm_tests {
         .map(BFieldElement::new)
         .to_vec();
         let secret_in = vec![];
-        let (_aet, _stdout, err) = simulate(&program, bad_stdin, secret_in);
+        let (_aet, _stdout, err) = simulate(Box::new(program), bad_stdin, secret_in);
         let Some(err) = err else {
             panic!("Sudoku verifier must fail on bad Sudoku.");
         };

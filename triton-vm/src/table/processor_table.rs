@@ -3191,7 +3191,7 @@ mod constraint_polynomial_tests {
     fn print_simple_processor_table_row_test() {
         let code = "push 2 push -1 add assert halt";
         let program = Program::from_code(code).unwrap();
-        let (aet, _, _) = simulate(&program, vec![], vec![]);
+        let (aet, _, _) = simulate(Box::new(program), vec![], vec![]);
         println!();
         for row in aet.processor_trace.rows() {
             println!("{}", ProcessorTraceRow { row });

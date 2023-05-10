@@ -32,7 +32,9 @@ default-features = false
 [dependencies]
 twenty-first = "0.21.1"
 triton-opcodes = {path = "../triton-opcodes"}
+triton-zmips = {path = "../triton-zmips"}
 triton-profiler = {path = "../triton-profiler"}
+triton-program = {path = "../triton-program"}
 anyhow = "1.0"
 bincode = "1.3"
 itertools = "0.10.5"

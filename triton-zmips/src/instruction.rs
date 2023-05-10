@@ -13,10 +13,17 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
 
 use crate::regs::{Reg, RegA};
+use triton_program::AbstractInstruction;
 use AnInstruction::*;
 
 /// An `Instruction` has `call` addresses encoded as absolute integers.
 pub type Instruction = AnInstruction<BFieldElement, Reg, RegA>;
+
+impl AbstractInstruction for Instruction {
+    fn clone_(&self) -> Box<dyn AbstractInstruction> {
+        Box::new(*self) as Box<dyn AbstractInstruction>
+    }
+}
 
 pub const ALL_INSTRUCTIONS: [Instruction; Instruction::COUNT] = all_instructions_without_args();
 pub const ALL_INSTRUCTION_NAMES: [&str; Instruction::COUNT] = all_instruction_names();
@@ -76,7 +83,7 @@ pub enum AnInstruction<L: PartialEq + Default, R: PartialEq + Default, A: Partia
     DIV((R, R, A)),
     MOD((R, R, A)),
     MOVE((R, A)),
-    LA((R, A)),
+    LA((R, L)),
 
     // Bitwise arithmetic on stack
     AND((R, R, A)),
@@ -231,7 +238,7 @@ impl<Dest: PartialEq + Default> AnInstruction<Dest, String, String> {
             DIV((r1, r2, a)) => DIV((r1.into(), r2.into(), a.into())),
             MOD((r1, r2, a)) => MOD((r1.into(), r2.into(), a.into())),
             MOVE((r, a)) => MOVE((r.into(), a.into())),
-            LA((r, a)) => LA((r.into(), a.into())),
+            LA((r, a)) => LA((r.into(), f(a))),
             AND((r1, r2, a)) => AND((r1.into(), r2.into(), a.into())),
             XOR((r1, r2, a)) => XOR((r1.into(), r2.into(), a.into())),
             OR((r1, r2, a)) => OR((r1.into(), r2.into(), a.into())),
@@ -295,11 +302,11 @@ impl<
 impl Instruction {
     pub fn args(&self) -> Vec<BFieldElement> {
         match self {
-            BEQ((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
-            BNE((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
-            BLT((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
-            BLE((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
-            BGT((r1, r2, addr)) => vec![r1.into(), r2.into(), *addr],
+            BEQ((r1, r2, addr)) => vec![BFieldElement::from(r1), BFieldElement::from(r2), *addr],
+            BNE((r1, r2, addr)) => vec![BFieldElement::from(r1), BFieldElement::from(r2), *addr],
+            BLT((r1, r2, addr)) => vec![BFieldElement::from(r1), BFieldElement::from(r2), *addr],
+            BLE((r1, r2, addr)) => vec![BFieldElement::from(r1), BFieldElement::from(r2), *addr],
+            BGT((r1, r2, addr)) => vec![BFieldElement::from(r1), BFieldElement::from(r2), *addr],
             J(addr) => vec![*addr],
             _ => vec![],
         }
@@ -409,7 +416,7 @@ const fn all_instructions_without_args(
         DIV(DEFAULT_INFO3),
         MOD(DEFAULT_INFO3),
         MOVE(DEFAULT_INFO2),
-        LA(DEFAULT_INFO2),
+        LA((Reg::Zero, BFIELD_ZERO)),
         AND(DEFAULT_INFO3),
         XOR(DEFAULT_INFO3),
         OR(DEFAULT_INFO3),

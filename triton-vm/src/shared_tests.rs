@@ -14,6 +14,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_profiler::prof_start;
 use triton_profiler::prof_stop;
 use triton_profiler::triton_profiler::TritonProfiler;
+use triton_program::FromCode;
 
 use crate::proof::Claim;
 use crate::proof::Proof;
@@ -23,13 +24,16 @@ use crate::table::master_table::MasterBaseTable;
 use crate::vm::simulate;
 use crate::vm::AlgebraicExecutionTrace;
 
-pub fn parse_setup_simulate(
+pub fn parse_setup_simulate<T>(
     code: &str,
     input_symbols: Vec<u64>,
     secret_input_symbols: Vec<u64>,
     maybe_profiler: &mut Option<TritonProfiler>,
-) -> (AlgebraicExecutionTrace, Vec<u64>) {
-    let program = Program::from_code(code);
+) -> (AlgebraicExecutionTrace, Vec<u64>)
+where
+    T: FromCode,
+{
+    let program = T::from_code(code);
 
     let program = program.expect("Program must parse.");
     let public_input = input_symbols.into_iter().map(BFieldElement::new).collect();
@@ -39,7 +43,7 @@ pub fn parse_setup_simulate(
         .collect();
 
     prof_start!(maybe_profiler, "simulate");
-    let (aet, stdout, err) = simulate(&program, public_input, secret_input);
+    let (aet, stdout, err) = simulate(program, public_input, secret_input);
     if let Some(error) = err {
         panic!("The VM encountered the following problem: {error}");
     }
@@ -49,13 +53,16 @@ pub fn parse_setup_simulate(
     (aet, stdout)
 }
 
-pub fn parse_simulate_prove(
+pub fn parse_simulate_prove<T>(
     code: &str,
     input_symbols: Vec<u64>,
     secret_input_symbols: Vec<u64>,
     maybe_profiler: &mut Option<TritonProfiler>,
-) -> (StarkParameters, Claim, Proof) {
-    let (aet, output_symbols) = parse_setup_simulate(
+) -> (StarkParameters, Claim, Proof)
+where
+    T: FromCode,
+{
+    let (aet, output_symbols) = parse_setup_simulate::<T>(
         code,
         input_symbols.clone(),
         secret_input_symbols,
@@ -110,7 +117,8 @@ impl SourceCodeAndInput {
     #[deprecated(since = "0.19.0", note = "use `simulate` instead")]
     pub fn run(&self) -> Vec<BFieldElement> {
         let program = Program::from_code(&self.source_code).expect("Could not load source code");
-        let (_, output, err) = simulate(&program, self.public_input(), self.secret_input());
+        let (_, output, err) =
+            simulate(Box::new(program), self.public_input(), self.secret_input());
         if let Some(e) = err {
             panic!("Running the program failed: {e}")
         }
@@ -119,7 +127,7 @@ impl SourceCodeAndInput {
 
     pub fn simulate(&self) -> (AlgebraicExecutionTrace, Vec<BFieldElement>, Option<Error>) {
         let program = Program::from_code(&self.source_code).expect("Could not load source code.");
-        simulate(&program, self.public_input(), self.secret_input())
+        simulate(Box::new(program), self.public_input(), self.secret_input())
     }
 }
 

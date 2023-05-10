@@ -1,37 +1,24 @@
-use criterion::criterion_group;
-use criterion::criterion_main;
-use criterion::BenchmarkId;
-use criterion::Criterion;
-use triton_opcodes::program::Program;
+use triton_profiler::triton_profiler::{Report, TritonProfiler};
+use triton_profiler::{prof_start, prof_stop};
+use triton_program::AbstractProgram;
+use triton_vm::shared_tests::SPECK128_ZMIPS;
+use triton_vm::stark::Stark;
+use triton_vm::table::master_table::MasterBaseTable;
+use triton_vm::vm::simulate;
+use triton_vm::{Claim, StarkParameters};
+use triton_zmips::program::Program;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::tip5::Tip5;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use triton_profiler::prof_start;
-use triton_profiler::prof_stop;
-use triton_profiler::triton_profiler::Report;
-use triton_profiler::triton_profiler::TritonProfiler;
-use triton_program::AbstractProgram;
-use triton_vm::proof::Claim;
-use triton_vm::shared_tests::FIBONACCI_SEQUENCE;
-use triton_vm::stark::Stark;
-use triton_vm::table::master_table::MasterBaseTable;
-use triton_vm::vm::simulate;
-use triton_vm::StarkParameters;
-
-/// cargo criterion --bench prove_fib_100
-fn prove_fib_100(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("prove_fib_100");
-    group.sample_size(10); // runs
-
-    let fib_100 = BenchmarkId::new("ProveFib100", 0);
-
-    let mut maybe_profiler = Some(TritonProfiler::new("Prove Fibonacci 100"));
+#[test]
+fn speck() {
+    let mut maybe_profiler = Some(TritonProfiler::new("Speck 128 zMIPS"));
     let mut report: Report = Report::placeholder();
 
     // stark object
     prof_start!(maybe_profiler, "parse program");
-    let program = match Program::from_code(FIBONACCI_SEQUENCE) {
+    let program = match Program::from_code(SPECK128_ZMIPS) {
         Err(e) => panic!("Cannot compile source code into program: {e}"),
         Ok(p) => Box::new(p) as Box<dyn AbstractProgram>,
     };
@@ -68,23 +55,7 @@ fn prove_fib_100(criterion: &mut Criterion) {
             Some(fri.domain.length),
         );
     }
-    //start the benchmarking
-    group.bench_function(fib_100, |bencher| {
-        bencher.iter(|| {
-            let _proof = Stark::prove(&parameters, &claim, &aet, &mut None);
-        });
-    });
-
-    group.finish();
-
+    Stark::prove(&parameters, &claim, &aet, &mut None);
     println!("Writing report ...");
     println!("{report}");
 }
-
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = prove_fib_100
-}
-
-criterion_main!(benches);

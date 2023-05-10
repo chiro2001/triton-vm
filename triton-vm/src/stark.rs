@@ -953,7 +953,7 @@ pub(crate) mod triton_stark_tests {
             .map(BFieldElement::new)
             .collect();
 
-        let (aet, stdout, err) = simulate(&program, public_input, secret_input);
+        let (aet, stdout, err) = simulate(Box::new(program), public_input, secret_input);
         if let Some(error) = err {
             panic!("The VM encountered the following problem: {error}");
         }
@@ -1845,7 +1845,7 @@ pub(crate) mod triton_stark_tests {
     #[test]
     fn triton_prove_verify_simple_program_test() {
         let code_with_input = test_hash_nop_nop_lt();
-        let (parameters, claim, proof) = parse_simulate_prove(
+        let (parameters, claim, proof) = parse_simulate_prove::<Program>(
             &code_with_input.source_code,
             code_with_input.input.clone(),
             code_with_input.secret_input.clone(),
@@ -1865,7 +1865,7 @@ pub(crate) mod triton_stark_tests {
     fn triton_prove_verify_halt_test() {
         let code_with_input = test_halt();
         let mut profiler = Some(TritonProfiler::new("Prove Halt"));
-        let (parameters, claim, proof) = parse_simulate_prove(
+        let (parameters, claim, proof) = parse_simulate_prove::<Program>(
             &code_with_input.source_code,
             code_with_input.input.clone(),
             code_with_input.secret_input.clone(),
@@ -1893,7 +1893,7 @@ pub(crate) mod triton_stark_tests {
         let code_with_input = test_halt();
 
         for _ in 0..100 {
-            let (parameters, claim, proof) = parse_simulate_prove(
+            let (parameters, claim, proof) = parse_simulate_prove::<Program>(
                 &code_with_input.source_code,
                 code_with_input.input.clone(),
                 code_with_input.secret_input.clone(),
@@ -1916,7 +1916,7 @@ pub(crate) mod triton_stark_tests {
     #[ignore = "used for tracking&debugging deserialization errors"]
     fn triton_load_verify_halt_test() {
         let code_with_input = test_halt();
-        let (parameters, claim, _) = parse_simulate_prove(
+        let (parameters, claim, _) = parse_simulate_prove::<Program>(
             &code_with_input.source_code,
             code_with_input.input.clone(),
             code_with_input.secret_input.clone(),
@@ -1944,7 +1944,7 @@ pub(crate) mod triton_stark_tests {
 
         let mut profiler = Some(TritonProfiler::new("Prove Fib 100"));
         let (parameters, claim, proof) =
-            parse_simulate_prove(source_code, stdin, secret_in, &mut profiler);
+            parse_simulate_prove::<Program>(source_code, stdin, secret_in, &mut profiler);
         let mut profiler = profiler.unwrap();
         profiler.finish();
 
@@ -1971,7 +1971,7 @@ pub(crate) mod triton_stark_tests {
             let stdin = vec![fib_seq_idx];
             let secret_in = vec![];
             let (parameters, claim, proof) =
-                parse_simulate_prove(code, stdin, secret_in, &mut None);
+                parse_simulate_prove::<Program>(code, stdin, secret_in, &mut None);
             match Stark::verify(&parameters, &claim, &proof, &mut None) {
                 Ok(result) => assert!(result, "The Verifier disagrees!"),
                 Err(err) => panic!("The Verifier is unhappy! {err}"),
@@ -1991,7 +1991,7 @@ pub(crate) mod triton_stark_tests {
     fn triton_prove_verify_many_u32_operations_test() {
         let mut profiler = Some(TritonProfiler::new("Prove Many U32 Ops"));
         let (parameters, claim, proof) =
-            parse_simulate_prove(MANY_U32_INSTRUCTIONS, vec![], vec![], &mut profiler);
+            parse_simulate_prove::<Program>(MANY_U32_INSTRUCTIONS, vec![], vec![], &mut profiler);
         let mut profiler = profiler.unwrap();
         profiler.finish();
 
@@ -2018,7 +2018,7 @@ pub(crate) mod triton_stark_tests {
             let fib_test_name = format!("element #{fibonacci_number:>4} from Fibonacci sequence");
             let mut profiler = Some(TritonProfiler::new(&fib_test_name));
             let (parameters, claim, _) =
-                parse_simulate_prove(source_code, stdin, vec![], &mut profiler);
+                parse_simulate_prove::<Program>(source_code, stdin, vec![], &mut profiler);
             let mut profiler = profiler.unwrap();
             profiler.finish();
 
@@ -2038,7 +2038,7 @@ pub(crate) mod triton_stark_tests {
 
         let source_code = format!("push {st0} log_2_floor halt");
         let (parameters, claim, proof) =
-            parse_simulate_prove(&source_code, vec![], vec![], &mut None);
+            parse_simulate_prove::<Program>(&source_code, vec![], vec![], &mut None);
         let result = Stark::verify(&parameters, &claim, &proof, &mut None);
         assert!(result.is_ok());
         assert!(result.unwrap());
@@ -2049,7 +2049,7 @@ pub(crate) mod triton_stark_tests {
     pub fn negative_log_2_floor_of_0_test() {
         let source_code = "push 0 log_2_floor halt";
         let (parameters, claim, proof) =
-            parse_simulate_prove(source_code, vec![], vec![], &mut None);
+            parse_simulate_prove::<Program>(source_code, vec![], vec![], &mut None);
         let result = Stark::verify(&parameters, &claim, &proof, &mut None);
         assert!(result.is_ok());
         assert!(result.unwrap());

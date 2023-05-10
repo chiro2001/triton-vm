@@ -31,3 +31,4 @@ rand = "0.8.5"
 strum = "0.24.1"
 strum_macros = "0.24.1"
 nom = "7.1"
+triton-program = { path = "../triton-program" }

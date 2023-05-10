@@ -1,12 +1,9 @@
 [package]
-name = "triton-zmips"
+name = "triton-program"
 version = "0.1.0"
 edition = "2021"
-authors = ["Chiro2001@163.com"]
 
-license = "Apache-2.0"
-description = "ZMIPS VM instructions and their translations"
-readme = "README.md"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dev-dependencies]
 proptest = "1.0"
@@ -19,6 +16,7 @@ features = ["html_reports"]
 version = "1"
 default-features = false
 
+
 [dependencies]
 twenty-first = "0.21.1"
 anyhow = "1.0"
@@ -28,4 +26,3 @@ rand = "0.8.5"
 strum = "0.24.1"
 strum_macros = "0.24.1"
 nom = "7.1"
-triton-program = { path = "../triton-program" }

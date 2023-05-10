@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::vec;
@@ -12,6 +13,7 @@ use strum_macros::EnumIter;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
 
+use triton_program::AbstractLabelledInstruction;
 use AnInstruction::*;
 
 use crate::ord_n::Ord16;
@@ -33,6 +35,12 @@ pub enum LabelledInstruction {
 
     /// Labels look like "`<name>:`" and are translated into absolute addresses.
     Label(String),
+}
+
+impl AbstractLabelledInstruction for LabelledInstruction {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
 }
 
 impl Display for LabelledInstruction {
@@ -369,7 +377,12 @@ fn ord16_to_bfe(n: &Ord16) -> BFieldElement {
 }
 
 /// Convert a program with labels to a program with absolute positions
+// pub fn convert_labels(program: &[Box<dyn AbstractLabelledInstruction>]) -> Vec<Instruction> {
 pub fn convert_labels(program: &[LabelledInstruction]) -> Vec<Instruction> {
+    // let program = program
+    //     .iter()
+    //     .flat_map(|x| x.as_any().downcast_ref())
+    //     .collect::<Vec<_>>();
     let mut label_map = HashMap::<String, usize>::new();
     let mut instruction_pointer: usize = 0;
 

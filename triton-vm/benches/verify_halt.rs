@@ -37,7 +37,7 @@ fn verify_halt(criterion: &mut Criterion) {
             .map_err(|e| panic!("Could not load proof from disk: {e:?}"))
             .unwrap()
     } else {
-        let (aet, _, err) = simulate(&program, vec![], vec![]);
+        let (aet, _, err) = simulate(Box::new(program), vec![], vec![]);
         if let Some(error) = err {
             panic!("The VM encountered the following problem: {error}");
         }
